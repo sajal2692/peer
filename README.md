@@ -48,6 +48,18 @@ Continue with Codex: codex resume 01a137ed-...
 
 Run the `Continue with` command in a terminal to keep talking to the other tool.
 
+### When to use what
+
+| You want | Use | Example |
+|---|---|---|
+| An independent second answer to what you just asked | `/peer` | You asked Claude Code how to speed up a slow query. `/peer` gets Codex's own answer without it seeing Claude's, so you can compare two fresh takes. |
+| A check on the answer you already got | `/peer review` | Claude Code wrote a migration plan. `/peer review data loss` has Codex look for holes in that plan. |
+| A side question, with the conversation as background | `/peer <question>` | Mid-way through a refactor, `/peer is there a simpler way to do this?` |
+| A quick opinion on something new | `/peer <question>` in a new session | `/peer SQLite or Postgres for a single-user app?` |
+| Your tool to weigh in on the other's answer | add `--assess` | `/peer --assess` gets Codex's answer, then Claude Code says where they agree, where they differ and which is better. |
+| A stronger or faster model for this one call | add `--model` or `--effort` | `/peer --effort max review` for a careful review of a risky change. |
+| A faster answer on a very long session | add `--trim` | `/peer --trim` sends a shortened conversation. |
+
 ### Options and settings
 
 Add options after `/peer` or `$peer` for one call:
