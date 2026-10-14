@@ -2,7 +2,7 @@
 
 Get a second answer from the other coding agent, for the same conversation.
 
-In Claude Code, type `/peer` and Codex answers. In Codex, type `$peer` and Claude Code answers. The other tool sees your conversation so far and can read the same files. Its answer comes back into the tool you asked from.
+In Claude Code, type `/peer` and Codex answers. In Codex, type `$peer` and Claude Code answers. It works in the terminal and in the desktop apps: the Claude Code CLI and the Code tab of the Claude desktop app, and the Codex CLI and Codex in the ChatGPT desktop app. The other tool sees your conversation so far and can read the same files. Its answer comes back into the tool you asked from.
 
 ## Install
 
@@ -84,7 +84,7 @@ peer --help                                            # every option
 - **What is sent.** Your messages, the assistant's replies, tool calls and their output, attached files and pasted images. Hidden reasoning and the tools' own setup text are not sent.
 - **Read-only.** The other tool can read files in the folder but cannot change them, run commands outside a read-only sandbox, or use connected apps such as mail or GitHub.
 - **Speed.** An answer takes from a few seconds to several minutes, depending on the model, the effort and the length of the conversation. If a very long conversation fails or is slow, try `--trim`.
-- **Scope.** Claude Code (CLI and desktop app) and Codex (CLI and the ChatGPT app). Regular ChatGPT and claude.ai chats are not supported.
+- **Scope.** Regular ChatGPT and claude.ai chats are not supported, because their history is not stored on your computer.
 
 ## License
 
