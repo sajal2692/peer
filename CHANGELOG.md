@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- One-line install: `curl -fsSL https://raw.githubusercontent.com/sajal2692/peer/main/install.sh | bash` downloads peer into `~/.local/share/peer` and links it. Running it again updates.
+
 ## 0.1.0
 
 First release.
