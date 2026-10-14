@@ -20,10 +20,10 @@ Pick the form from what the user wrote alongside `$peer`:
 | `$peer models` or `$peer models codex` / `$peer models claude` | `~/.local/bin/peer models <same words>` |
 
 - If the user gave `--model <name>` or `--effort <level>`, pass them through right after `--from codex`, for example `~/.local/bin/peer --from codex --model opus review`. Without them, peer uses `PEER_CLAUDE_MODEL` / `PEER_CLAUDE_EFFORT`, then `~/.config/peer/config.json`, then Claude Code's own config.
-- If the user gave `--assess`, `--details` (or `--no-assess`, `--no-details`), pass them through the same way. The same goes for the trimming flags `--trim`, `--max-message N`, `--max-tool-input N`, `--max-tool-output N`, `--budget N` and `--no-tools`. By default peer sends the whole conversation untrimmed. `--assess` asks for your assessment; `--details` prints the full run header.
+- If the user gave `--assess`, `--details` (or `--no-assess`, `--no-details`), pass them through the same way. The same goes for `--no-web` (keeps the other tool off the web; web access is on by default), and for the trimming flags `--trim`, `--max-message N`, `--max-tool-input N`, `--max-tool-output N`, `--budget N` and `--no-tools`. By default peer sends the whole conversation untrimmed. `--assess` asks for your assessment; `--details` prints the full run header.
 - `models` lists the model ids and effort levels each tool accepts, with a recommended and the current one. Like `config`, it asks no one.
 - `config` changes peer's saved defaults; it does not ask Claude Code. Run it in the foreground and show its output verbatim, nothing else. `<tool>` is the tool that answers (`codex` or `claude`), and `default` as the value clears a setting.
-- Put any user text in single quotes as one argument, escaping single quotes inside it.
+- Put any user text in single quotes as one argument, escaping single quotes inside it, and put `--` before it so text starting with `-` is not read as an option. For example: `~/.local/bin/peer --from codex -- '<question>'`.
 - Claude can take several minutes. Use a command timeout longer than peer's own, which is 30 minutes by default (35 minutes works), and wait for the command to finish.
 - The command needs network access and writes Claude's session files under `~/.claude`. If the sandbox blocks it, rerun it with escalated permissions.
 - peer drops the message that asked for it, so bare `$peer` makes Claude answer the user's previous message with your reply to it withheld.

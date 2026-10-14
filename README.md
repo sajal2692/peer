@@ -85,6 +85,7 @@ Add options after `/peer` or `$peer` for one call:
 | `--assess` | After the answer, your own tool compares the two answers and gives a verdict. (`review` is the reverse: the other tool judges your tool's reply.) |
 | `--details` | Show the full run: the exact commands, which message was answered, and how much was sent. |
 | `--trim` | Shorten long messages and tool output. By default the whole conversation is sent. |
+| `--no-web` | Keep the other tool off the web for this call. Web access is on by default. |
 
 Or save defaults for every call. Saved settings are shared between both tools:
 
@@ -108,9 +109,9 @@ peer --help                                            # every option
 
 ## Good to know
 
-- **What is sent.** Your messages, the assistant's replies, tool calls and their output, attached files and pasted images. Hidden reasoning and the tools' own setup text are not sent.
+- **What is sent.** Your messages, the assistant's replies, tool calls and their output, attached files, pasted images, and context added by hooks. The paths of instruction files such as `CLAUDE.md` are listed so the other tool can read them. Hidden reasoning and the tools' own setup text are not sent.
 - **Sign-in and billing.** peer has no account or API keys of its own. It runs the `codex` and `claude` command-line tools, so each answer uses whatever those tools are signed in with: your ChatGPT plan or an OpenAI API key for Codex, and your Claude subscription or an Anthropic API key for Claude Code. If `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` is set, the tool may bill that key instead.
-- **Read-only.** The other tool can read files in the folder but cannot change them, run commands outside a read-only sandbox, or use connected apps such as mail or GitHub.
+- **Read-only.** The other tool can read files but cannot change them, run commands outside a read-only sandbox, or use connected apps such as mail or GitHub. It can search and fetch web pages. If you work with untrusted content, `--no-web` (or `/peer config web off`) keeps it offline, so nothing it reads can be sent to a website.
 - **Speed.** An answer takes from a few seconds to several minutes, depending on the model, the effort and the length of the conversation. If a very long conversation fails or is slow, try `--trim`.
 - **Scope.** Regular ChatGPT and claude.ai chats are not supported, because their history is not stored on your computer.
 

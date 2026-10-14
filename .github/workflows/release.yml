@@ -22,7 +22,7 @@ jobs:
       - name: Take the release notes from CHANGELOG.md
         run: |
           awk -v v="${GITHUB_REF_NAME#v}" '
-            $0 ~ "^## \\[?" v "\\]?" {found=1; next}
+            $0 == "## " v || $0 == "## [" v "]" {found=1; next}
             found && /^## / {exit}
             found {print}
           ' CHANGELOG.md > notes.md

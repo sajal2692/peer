@@ -12,6 +12,7 @@ Add these after `/peer` or `$peer`, or pass them to `peer` in a terminal.
 | `--effort <level>` | The other tool's reasoning effort for this call. |
 | `--assess`, `--no-assess` | Whether your tool adds its own assessment after the answer: where the answers agree and differ, what changes, and a verdict. Off by default. |
 | `--details`, `--no-details` | Whether to show the full run header instead of the one-line stats. Off by default. |
+| `--web`, `--no-web` | Whether the other tool may search and fetch web pages. On by default. `--no-web` keeps it offline, so a prompt injection in the conversation or a file can't send what the tool reads to a website. |
 | `--trim`, `--no-trim` | Whether to shorten long content before sending. Off by default, so the whole conversation is sent. |
 | `--max-message N` | Keep at most N characters of each message. |
 | `--max-tool-input N` | Keep at most N characters of each tool call. |
@@ -62,6 +63,7 @@ Settings you save apply to every call, from both tools and the terminal.
 | `/peer config assess on\|off` | Always, or never, add the assessment. |
 | `/peer config details on\|off` | Always, or never, show the full header. |
 | `/peer config trim on\|off` | Always, or never, trim. |
+| `/peer config web on\|off` | Allow web access (the default), or keep the other tool offline. |
 | `/peer config budget <chars>` | Always cap the transcript at this many characters. |
 
 `codex` and `claude` name the tool that answers, not the one you are in. In Codex, type `$peer config ...`, and in a terminal, `peer config ...`. Use `default` as the value to clear a setting, for example `/peer config codex model default`.
@@ -89,7 +91,7 @@ Every key is optional.
 |---|---|
 | `PEER_CODEX_MODEL`, `PEER_CODEX_EFFORT` | Model and effort when Codex answers. |
 | `PEER_CLAUDE_MODEL`, `PEER_CLAUDE_EFFORT` | Model and effort when Claude Code answers. |
-| `PEER_ASSESS`, `PEER_DETAILS`, `PEER_TRIM` | `1` for on, `0` for off. |
+| `PEER_ASSESS`, `PEER_DETAILS`, `PEER_TRIM`, `PEER_WEB` | `1` for on, `0` for off. |
 | `PEER_CONFIG` | Use a different config file. |
 | `PEER_CODEX_BIN`, `PEER_CLAUDE_BIN` | Use a specific `codex` or `claude` binary. By default peer picks the newest it can find, including the Codex inside the ChatGPT app. |
 | `PEER_INSTALL_DIR` | Where the one-line installer keeps its copy of peer. The default is `~/.local/share/peer`. |

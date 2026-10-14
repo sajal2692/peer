@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- A follow-up `/peer` or `/peer review` now looks past earlier peer runs, so it judges the reply you asked about rather than the host relaying an earlier peer answer. In Claude Code, peer's own completion notification is recognised and skipped. A genuine latest input, such as a build finishing, is still answered as before.
+- `--no-web` (or `peer config web off`) keeps both tools off the web. Web access stays on by default.
+- If peer can't read Codex's feature list, it stops instead of running Codex with apps, plugins and browser control on.
+- `CLAUDE_CODE_OAUTH_TOKEN` and other user-set Claude Code settings now reach the Claude CLI, so token sign-ins work for `$peer`.
+- A notification that starts with a system reminder is labelled correctly instead of being read as a typed message.
+- `review` works when the reply was only tool calls, and the header says "Reviewing the reply to" in review mode.
+- The Claude Code skill runs peer in the foreground, falling back to the background for long runs.
 - One-line install: `curl -fsSL https://raw.githubusercontent.com/sajal2692/peer/main/install.sh | bash` downloads peer into `~/.local/share/peer` and links it. Running it again updates.
 
 ## 0.1.0

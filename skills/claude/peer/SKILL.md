@@ -1,7 +1,7 @@
 ---
 name: peer
 description: Ask Codex to answer from this same conversation and bring its answer back here. Use when the user types /peer, or asks for Codex's take, a second opinion from Codex or GPT, or what Codex would have said.
-argument-hint: "models | config ... | [--model M] [--effort E] [--assess] [--details] [--trim] [review [focus]] | [question]"
+argument-hint: "models | config ... | [--model M] [--effort E] [--assess] [--details] [--trim] [--no-web] [review [focus]] | [question]"
 allowed-tools: Bash(~/.local/bin/peer:*)
 ---
 
@@ -22,11 +22,11 @@ Pick the form from what the user typed after `/peer`:
 | `/peer models` or `/peer models codex` / `/peer models claude` | `~/.local/bin/peer models <same words>` |
 
 - If the user gave `--model <name>` or `--effort <level>` (anywhere after `/peer`), pass them through right after `--from claude`, for example `~/.local/bin/peer --from claude --model gpt-5.5 --effort high review`. Without them, peer uses `PEER_CODEX_MODEL` / `PEER_CODEX_EFFORT`, then `~/.config/peer/config.json`, then Codex's own config.
-- If the user gave `--assess`, `--details` (or `--no-assess`, `--no-details`), pass them through the same way. The same goes for the trimming flags `--trim`, `--max-message N`, `--max-tool-input N`, `--max-tool-output N`, `--budget N` and `--no-tools`. By default peer sends the whole conversation untrimmed. `--assess` asks for your assessment; `--details` prints the full run header.
+- If the user gave `--assess`, `--details` (or `--no-assess`, `--no-details`), pass them through the same way. The same goes for `--no-web` (keeps the other tool off the web; web access is on by default), and for the trimming flags `--trim`, `--max-message N`, `--max-tool-input N`, `--max-tool-output N`, `--budget N` and `--no-tools`. By default peer sends the whole conversation untrimmed. `--assess` asks for your assessment; `--details` prints the full run header.
 - `models` lists the model ids and effort levels each tool accepts, with a recommended and the current one. Like `config`, it asks no one.
 - `config` changes peer's saved defaults; it does not ask Codex. Run it in the foreground and show its output verbatim, nothing else. `<tool>` is the tool that answers (`codex` or `claude`), and `default` as the value clears a setting.
-- Put any user text in single quotes as one argument, escaping single quotes inside it.
-- Run the command with the Bash tool in the background (`run_in_background: true`). Codex can take several minutes. Wait for the completion notification, then read the output. Do not poll.
+- Put any user text in single quotes as one argument, escaping single quotes inside it, and put `--` before it so text starting with `-` is not read as an option. For example: `~/.local/bin/peer --from claude -- '<question>'`.
+- Run the command with the Bash tool in the foreground, with `timeout: 600000`. Codex usually answers within that. If the command runs longer and is moved to the background, wait for its completion notification, then read the output. Do not poll.
 - peer drops the user's `/peer` message and anything injected after it, so bare `/peer` makes Codex answer the latest input before it (usually the user's previous message, sometimes a task notification) with your reply to it withheld.
 - If you are consulting Codex on your own about the user's current message, rather than because the user asked for a peer answer, add `--current-turn`.
 
