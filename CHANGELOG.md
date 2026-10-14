@@ -1,16 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.1.1
 
+**Install**
+- One-line install: `curl -fsSL https://raw.githubusercontent.com/sajal2692/peer/main/install.sh | bash` downloads peer into `~/.local/share/peer` and links it. Running it again updates.
+
+**Fixes**
 - A follow-up `/peer` or `/peer review` now looks past earlier peer runs, including ones you asked for in plain words such as "what would Codex say?", so it judges the reply you asked about rather than the host relaying an earlier peer answer. In Claude Code, peer's own completion notification is recognised and skipped. A genuine latest input, such as a build finishing, is still answered as before.
-- `--no-web` (or `peer config web off`) keeps both tools off the web. Web access stays on by default.
 - If peer can't read Codex's feature list, it stops instead of running Codex with apps, plugins and browser control on.
 - `CLAUDE_CODE_OAUTH_TOKEN` and other user-set Claude Code settings now reach the Claude CLI, so token sign-ins work for `$peer`.
 - A notification that starts with a system reminder is labelled correctly instead of being read as a typed message.
 - `review` works when the reply was only tool calls, and the header says "Reviewing the reply to" in review mode.
+
+**Changes**
+- `--no-web` (or `peer config web off`) keeps both tools off the web. Web access stays on by default.
 - The Claude Code skill runs peer in the foreground, falling back to the background for long runs.
-- One-line install: `curl -fsSL https://raw.githubusercontent.com/sajal2692/peer/main/install.sh | bash` downloads peer into `~/.local/share/peer` and links it. Running it again updates.
+- The README has a demo GIF and a Prerequisites section.
 - The code is now split into modules in `src/peer`, with `peer.py` as a small launcher. Nothing changes in how you install or run peer.
+- CI tests Python 3.9 through 3.15, plus the newest Python build available, pre-releases included.
 
 ## 0.1.0
 
