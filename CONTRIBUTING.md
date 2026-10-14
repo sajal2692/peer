@@ -26,7 +26,7 @@ peer uses only the Python standard library and runs on Python 3.9 or newer. `pee
 
 The skills live in `skills/claude/peer` and `skills/codex/peer`. `tests/test_cli.py` runs peer end to end against fake `codex` and `claude` binaries, so the tests need neither tool installed.
 
-CI runs on every push and pull request: lint, the tests on Ubuntu with Python 3.9, 3.12 and 3.13 and on macOS with Python 3.9, a coverage floor of 80 percent, and a test install into an empty home folder.
+CI runs on every push and pull request: lint, the tests on Ubuntu with Python 3.9, 3.12, 3.13, 3.14 and 3.15 and on macOS with Python 3.9, a non-blocking run on the newest Python build including pre-releases, a coverage floor of 80 percent, and a test install into an empty home folder.
 
 ## How it works
 

@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+# Python versions: 3.9 is the oldest supported (it is macOS's system python3), 3.12 is the
+# primary version for lint, coverage and releases, and the matrix runs up to the newest stable
+# release. A separate job tries the newest build available, pre-releases included, so a break
+# in an upcoming Python shows up early without blocking merges.
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -29,7 +34,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python: ["3.9", "3.12", "3.13"]
+        python: ["3.9", "3.12", "3.13", "3.14", "3.15"]
         include:
           # One macOS job with the system Python version: macOS runners are scarce and
           # queue for a long time, and the code paths do not differ by Python version.
@@ -50,6 +55,21 @@ jobs:
           test -L "$HOME/.claude/skills/peer" && test -L "$HOME/.codex/skills/peer"
       - name: Install with the one-line installer, then update it
         run: bash scripts/test_one_line_install.sh
+
+  newest-python:
+    name: test (newest Python, pre-releases included)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+          allow-prereleases: true
+          # Look past the runner's cached versions for the newest build.
+          check-latest: true
+      - run: python --version
+      - run: python -W error -m unittest discover -s tests -v
 
   coverage:
     runs-on: ubuntu-latest
