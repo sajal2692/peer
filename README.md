@@ -82,6 +82,7 @@ peer --help                                            # every option
 ## Good to know
 
 - **What is sent.** Your messages, the assistant's replies, tool calls and their output, attached files and pasted images. Hidden reasoning and the tools' own setup text are not sent.
+- **Sign-in and billing.** peer has no account or API keys of its own. It runs the `codex` and `claude` command-line tools, so each answer uses whatever those tools are signed in with: your ChatGPT plan or an OpenAI API key for Codex, and your Claude subscription or an Anthropic API key for Claude Code. If `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` is set, the tool may bill that key instead. The Claude desktop app signs in separately from the `claude` command-line tool, so for `$peer` run `claude auth login` once with the account you use for Claude Code. Check the sign-ins with `codex login status` and `claude auth status`.
 - **Read-only.** The other tool can read files in the folder but cannot change them, run commands outside a read-only sandbox, or use connected apps such as mail or GitHub.
 - **Speed.** An answer takes from a few seconds to several minutes, depending on the model, the effort and the length of the conversation. If a very long conversation fails or is slow, try `--trim`.
 - **Scope.** Regular ChatGPT and claude.ai chats are not supported, because their history is not stored on your computer.
