@@ -14,7 +14,13 @@ git config --global user.name test
 remote="$work/remote.git"
 git init --quiet --bare "$remote"
 git -C "$remote" symbolic-ref HEAD refs/heads/main
-git -C "$repo" push --quiet "$remote" HEAD:refs/heads/main
+# A snapshot of the committed files, so a shallow CI checkout works too.
+mkdir "$work/snapshot"
+git -C "$repo" archive HEAD | tar -x -C "$work/snapshot"
+git -C "$work/snapshot" init --quiet
+git -C "$work/snapshot" add -A
+git -C "$work/snapshot" commit --quiet -m "snapshot"
+git -C "$work/snapshot" push --quiet "$remote" HEAD:refs/heads/main
 export PEER_REPO_URL="$remote"
 
 bash < "$repo/install.sh"
