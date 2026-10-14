@@ -87,6 +87,53 @@ class OwnPeerRunTests(unittest.TestCase):
         self.assertEqual(req.target, "Is this regex safe?")
         self.assertNotIn("(relayed)", req.prompt)
 
+    def test_a_plain_words_request_counts_as_a_peer_turn(self):
+        rows = [
+            human("How should I cache this?"),
+            claude_assistant({"type": "text", "text": "Use an LRU cache."}),
+            human("what would codex say?"),
+            bash_call("p1", "~/.local/bin/peer --from claude"),
+            claude_assistant({"type": "text", "text": "## Codex's answer ... (relayed)"}),
+            human("<command-name>/peer</command-name><command-args>review</command-args>"),
+        ]
+        session = peer.parse_claude(write_jsonl(rows))
+        req = peer.build_request(session, "codex", "review", "", True, peer.Limits())
+        self.assertEqual(req.target, "How should I cache this?")
+        self.assertNotIn("(relayed)", req.prompt)
+
+    def test_a_current_turn_consult_keeps_the_users_turn(self):
+        rows = [
+            human("How should I cache this?"),
+            bash_call("p1", "~/.local/bin/peer --from claude --current-turn"),
+            claude_assistant({"type": "text", "text": "Use an LRU cache; Codex agrees."}),
+            human("<command-name>/peer</command-name><command-args>review</command-args>"),
+        ]
+        session = peer.parse_claude(write_jsonl(rows))
+        req = peer.build_request(session, "codex", "review", "", True, peer.Limits())
+        self.assertEqual(req.target, "How should I cache this?")
+        self.assertIn("Codex agrees", req.prompt)
+
+    def test_codex_plain_words_request(self):
+        rows = [
+            {"type": "session_meta", "payload": {"cwd": "/proj"}},
+            codex_event({"type": "UserMessage", "content": [{"type": "text", "text": "Is this regex safe?"}]}),
+            codex_event({"type": "AgentMessage", "content": [{"type": "Text", "text": "Mostly."}]}),
+            codex_event({"type": "UserMessage", "content": [{"type": "text", "text": "ask claude too"}]}),
+            codex_event(
+                {
+                    "type": "CommandExecution",
+                    "command": ["/bin/zsh", "-lc", "~/.local/bin/peer --from codex"],
+                    "aggregated_output": "## Claude Code's answer",
+                    "exit_code": 0,
+                }
+            ),
+            codex_event({"type": "AgentMessage", "content": [{"type": "Text", "text": "Claude says (relayed)"}]}),
+            codex_event({"type": "UserMessage", "content": [{"type": "text", "text": "$peer review"}]}),
+        ]
+        session = peer.parse_codex(write_jsonl(rows))
+        req = peer.build_request(session, "claude", "review", "", True, peer.Limits())
+        self.assertEqual(req.target, "Is this regex safe?")
+
     def test_only_peer_commands_with_from_count(self):
         self.assertTrue(peer.is_peer_command({"command": "~/.local/bin/peer --from claude review 'x'"}))
         self.assertTrue(peer.is_peer_command({"command": "cd /p && ./peer.py --from codex"}))

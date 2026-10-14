@@ -114,6 +114,9 @@ class Item:
     user_supplied: bool = False
     # The completion notification of a peer run started from this session.
     peer_run: bool = False
+    # A call that ran peer on the user's behalf (not with --current-turn), so its turn was a
+    # request for peer even when the user asked in plain words.
+    peer_request: bool = False
 
     @property
     def starts_turn(self) -> bool:
@@ -343,8 +346,15 @@ TOOL_USE_ID_RE = re.compile(r"<tool-use-id>\s*([\w-]+)\s*</tool-use-id>")
 
 
 def is_peer_command(value) -> bool:
-    command = value.get("command") if isinstance(value, dict) else None
+    command = value.get("command") if isinstance(value, dict) else value
     return isinstance(command, str) and bool(PEER_COMMAND_RE.search(command))
+
+
+def is_peer_request(value) -> bool:
+    """A peer run made because the user asked for one. With --current-turn the agent consulted
+    peer about the user's message on its own, so that turn is still the user's work."""
+    command = value.get("command") if isinstance(value, dict) else value
+    return is_peer_command(command) and "--current-turn" not in command
 
 
 def queued_copy_follows(rows: list[dict], index: int, attachment: dict, window: int = 40) -> bool:
@@ -441,9 +451,11 @@ def parse_claude(path: Path) -> Session:
                         ask_ids.add(block.get("id"))
                         items.append(tool_item("AskUserQuestion", block.get("input"), ask_brief(block.get("input"))))
                     else:
+                        call = tool_item(str(block.get("name")), block.get("input"))
                         if block.get("name") == "Bash" and is_peer_command(block.get("input")):
                             peer_call_ids.add(block.get("id"))
-                        items.append(tool_item(str(block.get("name")), block.get("input")))
+                            call.peer_request = is_peer_request(block.get("input"))
+                        items.append(call)
     for item in items:
         match = TOOL_USE_ID_RE.search(item.text) if item.role == "input" else None
         if match and match.group(1) in peer_call_ids:
@@ -468,7 +480,8 @@ def codex_item(item: dict, images: list | None = None) -> list[Item]:
         exit_code = item.get("exit_code")
         if exit_code not in (None, 0, "0"):
             output = f"(exit {exit_code}) {output}"
-        return [Item("tool", f"shell: {command}"), Item("result", output)]
+        call = Item("tool", f"shell: {command}", peer_request=is_peer_request(str(command)))
+        return [call, Item("result", output)]
     if kind == "McpToolCall":
         result = item.get("result")
         result_text = blocks_text(result.get("content")) if isinstance(result, dict) else str(result or "")
@@ -527,7 +540,9 @@ def codex_legacy(rows: list[dict]) -> list[Item]:
             if text.strip():
                 items.append(Item(p["role"], text))
         elif p.get("type") in ("function_call", "custom_tool_call"):
-            items.append(tool_item(str(p.get("name")), p.get("arguments") or p.get("input")))
+            call = tool_item(str(p.get("name")), p.get("arguments") or p.get("input"))
+            call.peer_request = is_peer_request(call.detail)
+            items.append(call)
         elif p.get("type") in ("function_call_output", "custom_tool_call_output"):
             out = p.get("output")
             items.append(Item("result", out if isinstance(out, str) else blocks_text(out)))
@@ -826,9 +841,14 @@ def drop_from_last_typed(turns: list[list[Item]]) -> list[list[Item]]:
 
 def is_peer_turn(turn: list[Item]) -> bool:
     """A turn that is about an earlier peer call rather than the user's work: one the user
-    started with /peer or $peer, or the notification that a peer run had finished."""
+    started with /peer or $peer, one where the user asked for peer in plain words and the
+    agent ran it, or the notification that a peer run had finished."""
     first = turn[0]
-    return (first.role == "user" and bool(PEER_INVOCATION_RE.match(first.text))) or first.peer_run
+    if first.peer_run:
+        return True
+    if first.role != "user":
+        return False
+    return bool(PEER_INVOCATION_RE.match(first.text)) or any(item.peer_request for item in turn)
 
 
 def drop_earlier_peer_turns(turns: list[list[Item]]) -> list[list[Item]]:
