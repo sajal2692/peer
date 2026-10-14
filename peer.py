@@ -1103,6 +1103,17 @@ def claude_extra_models() -> list[tuple[str, str]]:
     return extra
 
 
+def table(headers: list[str], rows: list[list[str]]) -> list[str]:
+    """A Markdown table, which both tools render when they show peer's output."""
+
+    def cell(value: str) -> str:
+        return value.replace("|", "\\|").replace("\n", " ").strip()
+
+    lines = ["| " + " | ".join(headers) + " |", "|" + "---|" * len(headers)]
+    lines += ["| " + " | ".join(cell(v) for v in row) + " |" for row in rows]
+    return lines
+
+
 def list_models(tools: list[str]) -> str:
     config = load_config()
     out: list[str] = []
@@ -1110,34 +1121,33 @@ def list_models(tools: list[str]) -> str:
         current = resolve_setting(tool, "model", None, config).value or own_default(tool, "model")
         if tool == "codex":
             models = codex_models(find_binary("codex"))
-            out.append("Models when Codex answers (from codex debug models, best first):")
-            width = max((len(m["slug"]) for m in models), default=0)
+            rows = []
             for index, m in enumerate(models):
-                tags = []
-                if index == 0:
-                    tags.append("recommended")
-                if m["slug"] == current:
-                    tags.append("current")
-                efforts = "/".join(r.get("effort", "") for r in m.get("supported_reasoning_levels") or [])
-                note = f"  [{', '.join(tags)}]" if tags else ""
-                out.append(f"  {m['slug']:<{width}}  {m.get('description', '').strip()}{note}")
-                out.append(f"  {'':<{width}}  effort: {efforts}")
+                tags = (["recommended"] if index == 0 else []) + (["current"] if m["slug"] == current else [])
+                efforts = ", ".join(r.get("effort", "") for r in m.get("supported_reasoning_levels") or [])
+                rows.append([f"`{m['slug']}`", efforts, m.get("description", ""), ", ".join(tags)])
+            out += ["### When Codex answers", ""]
+            out += table(["Model", "Effort levels", "Description", "Note"], rows)
+            out += ["", "From Codex's own model catalog, best first."]
         else:
-            efforts = "/".join(claude_efforts(find_binary("claude")))
-            out.append("Models when Claude Code answers (aliases always point at the newest version):")
-            rows = CLAUDE_ALIASES + [(v, d) for v, d in claude_extra_models() if v not in dict(CLAUDE_ALIASES)]
-            width = max(len(v) for v, _ in rows)
-            for value, note in rows:
+            extra = [(v, d) for v, d in claude_extra_models() if v not in dict(CLAUDE_ALIASES)]
+            rows = []
+            for value, note in CLAUDE_ALIASES + extra:
                 # peer's pick for a second opinion: strong, and quicker than Fable.
                 tags = (["recommended"] if value == "opus" else []) + (["current"] if value == current else [])
-                out.append(f"  {value:<{width}}  {note}" + (f"  [{', '.join(tags)}]" if tags else ""))
-            out.append("  Add [1m] for a 1M-token context, e.g. opus[1m]. Full ids such as claude-opus-5-5 also work.")
-            out.append(f"  effort: {efforts}")
-            if not current:
-                out.append("  current: Claude Code's default")
+                rows.append([f"`{value}`", note, ", ".join(tags)])
+            out += ["### When Claude Code answers", ""]
+            out += table(["Model", "Description", "Note"], rows)
+            out += [
+                "",
+                f"Effort levels: {', '.join(claude_efforts(find_binary('claude')))}. Aliases always point at the "
+                "newest version. Add `[1m]` for a 1M-token context, such as `opus[1m]`; full IDs such as "
+                "`claude-opus-5-5` also work." + ("" if current else " Current: Claude Code's default."),
+            ]
         out.append("")
     out.append(
-        "Set one: peer config codex model <id>, peer config claude model <alias>, or for one call: peer --model <id>"
+        "Set one with `peer config codex model <id>` or `peer config claude model <alias>`, or for one call "
+        "with `--model <id>`."
     )
     return "\n".join(out)
 

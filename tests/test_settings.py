@@ -149,9 +149,9 @@ class ModelListTests(unittest.TestCase):
             tmp.cleanup()
         self.assertNotIn("hidden", text)
         self.assertLess(text.index("best"), text.index("old"))
-        self.assertIn("Best.  [recommended]", text)
-        self.assertIn("Older.  [current]", text)
-        self.assertIn("effort: low/high", text)
+        self.assertIn("| `best` | low, high | Best. | recommended |", text)
+        self.assertIn("| `old` | low | Older. | current |", text)
+        self.assertIn("| Model | Effort levels | Description | Note |", text)
 
 
 if __name__ == "__main__":
