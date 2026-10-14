@@ -28,8 +28,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]
         python: ["3.9", "3.12", "3.13"]
+        include:
+          # One macOS job with the system Python version: macOS runners are scarce and
+          # queue for a long time, and the code paths do not differ by Python version.
+          - os: macos-latest
+            python: "3.9"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

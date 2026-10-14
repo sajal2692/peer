@@ -10,7 +10,7 @@ python3 scripts/check_dashes.py                # the project avoids em dashes
 
 `peer.py` is a single file that uses only the Python standard library and runs on Python 3.9 or newer. The skills live in `skills/claude/peer` and `skills/codex/peer`. `tests/test_cli.py` runs peer end to end against fake `codex` and `claude` binaries, so the tests need neither tool installed.
 
-CI runs on every push and pull request: lint, the tests on macOS and Ubuntu with Python 3.9, 3.12 and 3.13, a coverage floor of 80 percent, and a test install into an empty home folder.
+CI runs on every push and pull request: lint, the tests on Ubuntu with Python 3.9, 3.12 and 3.13 and on macOS with Python 3.9, a coverage floor of 80 percent, and a test install into an empty home folder.
 
 ## How it works
 
