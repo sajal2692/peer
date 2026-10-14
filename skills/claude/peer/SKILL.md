@@ -7,7 +7,7 @@ allowed-tools: Bash(~/.local/bin/peer:*)
 
 # Peer: Codex's answer to the same conversation
 
-`peer` sends this session's transcript to Codex (headless, read-only, same working directory) and prints Codex's answer under a header that says exactly what ran.
+`peer` sends this session's transcript to Codex (headless, with read-only tools only, in the same working directory) and prints Codex's answer under a header that says exactly what ran.
 
 ## Run it
 

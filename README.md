@@ -21,7 +21,7 @@ cd peer
 - `~/.claude/skills/peer` is the `/peer` skill for Claude Code
 - `~/.codex/skills/peer` is the `$peer` skill for Codex
 
-Restart Claude Code or Codex after installing so they pick up the new skill. Check the install with `peer --version`.
+Restart Claude Code or Codex after installing so they pick up the new skill. If `~/.local/bin` is not on your PATH, `install.sh` says so. The skills work either way, but to run `peer` yourself, add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile. Check the install with `peer --version`.
 
 ## Use it
 
@@ -108,7 +108,7 @@ The easiest way to set defaults is `config`, from either tool or a terminal. Set
 
 `codex` and `claude` name the tool that answers, not the one you are in. In a terminal, use `peer config ...` and `peer models`.
 
-`models` reads the lists live. Codex's list comes from its own model catalog (`codex debug models`), in Codex's order, and the first entry is marked recommended. For Claude Code, peer lists the aliases (`fable`, `opus`, `sonnet`, `haiku`), which always point to the newest version, plus any extra models Claude Code offers your account. Its recommended pick is `opus`. That is peer's own choice, because Claude Code has no ranking to read. Add `--model` with any listed id or alias. Add `[1m]` to a Claude alias, such as `opus[1m]`, for a 1M-token context.
+Codex's list comes live from its own model catalog (`codex debug models`), in Codex's order, and the first entry is marked recommended. Claude Code has no command that lists models, so peer lists the aliases (`fable`, `opus`, `sonnet`, `haiku`), which always point to the newest version, plus any extra models Claude Code offers your account. Its recommended pick is `opus`. That is peer's own choice, because Claude Code has no ranking to read. Add `--model` with any listed id or alias. Add `[1m]` to a Claude alias, such as `opus[1m]`, for a 1M-token context.
 
 `/peer config` shows something like this:
 
@@ -137,11 +137,11 @@ When more than one source sets a value, the order is: flag, then environment var
 2. **Turns it into plain text.** See "What the other tool sees" below for exactly what is kept.
 3. **Drops the request itself.** Your `/peer` message, and anything that arrived after it, is not sent.
 4. **Asks the other tool**, headless and read-only, in the same folder:
-   - Codex runs as `codex exec --sandbox read-only`.
-   - Claude Code runs as `claude -p`, allowed only to read files, search and use read-only git commands.
+   - Codex runs as `codex exec --sandbox read-only`. Its commands run inside that sandbox. peer also switches off every Codex feature that can act outside it: connected apps (mail, calendar, Drive, GitHub), plugins and their MCP servers, the MCP servers in your `config.toml`, and browser and computer control.
+   - Claude Code runs as `claude -p` with only Read, Grep, Glob, WebSearch and WebFetch available (`--tools`), so permission rules in your settings cannot bring back Bash or editing. MCP servers, hooks and skills are off.
 5. **Prints the header and answer**, which the skill then shows you, followed by its assessment if that is turned on.
 
-peer sends a plain-text reconstruction of the conversation rather than using each tool's own session import. This works the same in both directions and never writes into the other tool's history. The cost is that the other tool gets a summary-level replay, not an exact one.
+peer sends a plain-text reconstruction of the conversation rather than using each tool's own session import. This works the same in both directions and never changes your existing sessions in the other tool. Each call starts a new session there, which you can continue with the `Continue with` command. Use `--ephemeral` if you don't want it kept. The cost is that the other tool gets a summary-level replay, not an exact one.
 
 ## What the other tool sees
 
@@ -208,7 +208,9 @@ Set `PEER_CODEX_BIN` or `PEER_CLAUDE_BIN` to force a particular binary.
 - Very long sessions can be slow or exceed the other model's context window. If that happens, use `--trim` or `--budget`.
 - **Platform.** Tested on macOS only. The Codex bundled inside the ChatGPT app is found at its macOS path.
 - **The Claude Code skill runs peer in the background**, so the answer arrives as a separate step after the run finishes.
-- peer never runs inside a session it started itself (it sets `PEER_ACTIVE`), so the two tools can't call each other in a loop.
+- peer sets `PEER_ACTIVE` for the process it starts and refuses to run under it, so the two tools can't call each other in a loop. A peer session you later resume by hand is an ordinary session, and peer works there.
+- peer reads the whole transcript into memory, including pasted images. Sessions of a few hundred MB are slow to read.
+- Codex keeps its own compaction summaries encrypted, so they can't be sent. The raw history before a Codex compaction is still in its transcript, and that is sent.
 
 ## License
 

@@ -13,6 +13,10 @@ from helpers import PNG_1PX, Sandbox, claude_assistant, claude_user, codex_event
 FAKE_CODEX = r"""
 import json, os, sys, time
 args = sys.argv[1:]
+if args[:2] == ["features", "list"]:
+    print("apps                stable  true\nplugins             stable  true\nshell_tool          stable  true")
+    print("computer_use        stable  false")
+    sys.exit(0)
 prompt = sys.stdin.read()
 record = {"args": args, "prompt": prompt, "env": {k: os.environ.get(k) for k in
           ("PEER_ACTIVE", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CLAUDECODE")}}
@@ -113,6 +117,20 @@ class ClaudeToCodexTests(CliTestCase):
         self.assertNotIn("/peer", rec["prompt"])
         self.assertEqual(rec["args"][:3], ["exec", "--sandbox", "read-only"])
 
+    def test_codex_tools_that_act_outside_the_sandbox_are_disabled(self):
+        (peer.CODEX_HOME).mkdir(parents=True)
+        (peer.CODEX_HOME / "config.toml").write_text(
+            'model = "x"\n[mcp_servers.mail]\ncommand = "m"\n[mcp_servers.mail.env]\nA = "1"\n'
+            '[mcp_servers."my.server"]\nurl = "u"\n'
+        )
+        self.run_main("--from", "claude")
+        args = " ".join(self.recorded()["args"])
+        self.assertIn("--disable apps --disable plugins", args)
+        self.assertNotIn("computer_use", args)  # reported as off, and unknown names would be an error
+        self.assertIn("-c mcp_servers.mail.enabled=false", args)
+        self.assertIn('-c mcp_servers."my.server".enabled=false', args)
+        self.assertNotIn("mail.env", args)
+
     def test_child_environment_is_scrubbed(self):
         self.run_main("--from", "claude")
         env = self.recorded()["env"]
@@ -166,6 +184,12 @@ class ClaudeToCodexTests(CliTestCase):
         self.assertIn("--- prompt ---", out)
         self.assertFalse(self.record.exists())
 
+    def test_missing_binary_is_a_clean_error(self):
+        os.environ["PEER_CODEX_BIN"] = str(self.tmp / "nope")
+        code, _, err = self.run_main("--from", "claude")
+        self.assertEqual(code, 1)
+        self.assertIn("Could not start Codex", err)
+
 
 class ImageTests(CliTestCase):
     def test_pasted_image_is_readable_during_the_run_and_removed_after(self):
@@ -201,7 +225,9 @@ class CodexToClaudeTests(CliTestCase):
         rec = self.recorded()
         self.assertIn("Is this regex safe?", rec["prompt"])
         self.assertNotIn("backtrack badly", rec["prompt"])
-        self.assertIn("--disallowedTools", rec["args"])
+        tools = rec["args"][rec["args"].index("--tools") + 1]
+        self.assertEqual(tools, "Read,Grep,Glob,WebSearch,WebFetch")
+        self.assertIn("--strict-mcp-config", rec["args"])
         self.assertEqual(rec["args"][rec["args"].index("--model") + 1], "opus")
 
     def test_claude_runs_in_the_session_folder(self):

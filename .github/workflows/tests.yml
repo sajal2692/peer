@@ -37,6 +37,12 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -W error -m unittest discover -s tests -v
+      - name: Install into a fresh home
+        run: |
+          export HOME="$(mktemp -d)"
+          bash install.sh
+          "$HOME/.local/bin/peer" --version
+          test -L "$HOME/.claude/skills/peer" && test -L "$HOME/.codex/skills/peer"
 
   coverage:
     runs-on: ubuntu-latest

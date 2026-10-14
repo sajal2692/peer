@@ -5,7 +5,7 @@ description: Ask Claude Code to answer from this same conversation and bring its
 
 # Peer: Claude Code's answer to the same conversation
 
-`peer` sends this thread's transcript to Claude Code (headless, read-only, same working directory) and prints Claude's answer under a header that says exactly what ran.
+`peer` sends this thread's transcript to Claude Code (headless, with read-only tools only, in the same working directory) and prints Claude's answer under a header that says exactly what ran.
 
 ## Run it
 
@@ -24,7 +24,7 @@ Pick the form from what the user wrote alongside `$peer`:
 - `models` lists the model ids and effort levels each tool accepts, with a recommended and the current one. Like `config`, it asks no one.
 - `config` changes peer's saved defaults; it does not ask Claude Code. Run it in the foreground and show its output verbatim, nothing else. `<tool>` is the tool that answers (`codex` or `claude`), and `default` as the value clears a setting.
 - Put any user text in single quotes as one argument, escaping single quotes inside it.
-- Claude can take several minutes. Use a long command timeout (at least 20 minutes) and wait for the command to finish.
+- Claude can take several minutes. Use a command timeout longer than peer's own, which is 30 minutes by default (35 minutes works), and wait for the command to finish.
 - The command needs network access and writes Claude's session files under `~/.claude`. If the sandbox blocks it, rerun it with escalated permissions.
 - peer drops the message that asked for it, so bare `$peer` makes Claude answer the user's previous message with your reply to it withheld.
 - If you are consulting Claude on your own about the user's current message, rather than because the user asked for a peer answer, add `--current-turn`.

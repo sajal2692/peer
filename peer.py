@@ -18,12 +18,14 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import glob
 import json
 import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -48,18 +50,8 @@ CODEX_BUNDLED = [
 ]
 CLAUDE_FALLBACKS = [str(Path.home() / ".local/bin/claude"), str(Path.home() / ".claude/local/claude")]
 
-# Tools the Claude peer may use. Everything else is denied in print mode.
-CLAUDE_READ_ONLY_TOOLS = [
-    "Read",
-    "Grep",
-    "Glob",
-    "WebSearch",
-    "WebFetch",
-    "Bash(git status:*)",
-    "Bash(git log:*)",
-    "Bash(git diff:*)",
-    "Bash(git show:*)",
-]
+# The only tools the Claude peer has. None of them can change files or run commands.
+CLAUDE_READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "WebSearch", "WebFetch"]
 
 # Session-specific variables that must not leak into the peer process.
 SCRUB_EXACT = {
@@ -102,6 +94,10 @@ class Item:
     role: str
     text: str
     label: str = ""
+    # The untrimmed form, when text is a short summary (for example a tool call's full input).
+    detail: str = ""
+    # Supplied by the user (an attached file, a hook's context), so it is never withheld.
+    user_supplied: bool = False
 
     @property
     def starts_turn(self) -> bool:
@@ -198,6 +194,15 @@ def save_images(prompt: str, images: list, folder: Path) -> str:
     return IMAGE_REF_RE.sub(write, prompt)
 
 
+def full_input(name: str, value) -> str:
+    return f"{name}: {value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)}"
+
+
+def tool_item(name: str, value, brief: str | None = None) -> Item:
+    """A tool call: a one-line summary for trimmed output, and the full input otherwise."""
+    return Item("tool", f"{name}: {brief if brief is not None else brief_input(value)}", detail=full_input(name, value))
+
+
 def brief_input(value) -> str:
     if isinstance(value, dict):
         for key in ("command", "cmd", "file_path", "path", "pattern", "url", "query", "description", "prompt"):
@@ -252,14 +257,18 @@ def ask_brief(value) -> str:
     return brief_input(value)
 
 
-def claude_attachment(attachment: dict, user_texts: set, images: list, instruction_files: list) -> list[Item]:
+def queued_text(attachment: dict, images: list | None = None) -> str:
+    prompt = attachment.get("prompt")
+    return REMINDER_RE.sub("", prompt if isinstance(prompt, str) else blocks_text(prompt, images)).strip()
+
+
+def claude_attachment(attachment: dict, duplicate: bool, images: list, instruction_files: list) -> list[Item]:
     """Context Claude Code adds through attachment rows rather than user messages."""
     kind = attachment.get("type")
     if kind == "queued_command":
         # A message sent while Claude Code was busy. Older versions also wrote it as a user row.
-        prompt = attachment.get("prompt")
-        text = REMINDER_RE.sub("", prompt if isinstance(prompt, str) else blocks_text(prompt, images)).strip()
-        if not text or " ".join(text.split()) in user_texts:
+        text = queued_text(attachment, images)
+        if not text or duplicate:
             return []
         origin = attachment.get("origin") if isinstance(attachment.get("origin"), dict) else {}
         if origin.get("kind") == "human":
@@ -284,16 +293,25 @@ def claude_attachment(attachment: dict, user_texts: set, images: list, instructi
                 },
                 images,
             )
-            return [Item("tool", f"attached image: {name}"), Item("result", ref if ref != "[image]" else name)]
+            return [
+                Item("tool", f"attached image: {name}", user_supplied=True),
+                Item("result", ref if ref != "[image]" else name, user_supplied=True),
+            ]
         body = (content.get("file") or {}).get("content") if isinstance(content.get("file"), dict) else None
-        return [Item("tool", f"attached file: {name}"), Item("result", body if isinstance(body, str) else "")]
+        return [
+            Item("tool", f"attached file: {name}", user_supplied=True),
+            Item("result", body if isinstance(body, str) else "", user_supplied=True),
+        ]
     if kind == "at_mention_reference":
         mentions = attachment.get("mentions") or []
-        return [Item("tool", "mentioned file (not read): " + ", ".join(map(str, mentions)))] if mentions else []
+        text = "mentioned file (not read): " + ", ".join(map(str, mentions))
+        return [Item("tool", text, user_supplied=True)] if mentions else []
     if kind == "hook_additional_context":
         texts = attachment.get("content") or []
         text = "\n".join(t for t in texts if isinstance(t, str)) if isinstance(texts, list) else str(texts)
-        return [Item("tool", "context added by a hook"), Item("result", text)] if text.strip() else []
+        if not text.strip():
+            return []
+        return [Item("tool", "context added by a hook", user_supplied=True), Item("result", text, user_supplied=True)]
     if kind == "instructions":
         for entry in attachment.get("files") or []:
             if isinstance(entry, dict) and entry.get("path") and entry["path"] not in instruction_files:
@@ -301,6 +319,19 @@ def claude_attachment(attachment: dict, user_texts: set, images: list, instructi
     if kind == "nested_memory" and attachment.get("path") and attachment["path"] not in instruction_files:
         instruction_files.append(attachment["path"])
     return []
+
+
+def queued_copy_follows(rows: list[dict], index: int, attachment: dict, window: int = 40) -> bool:
+    """True when a queued message is also written as a user row shortly after it, as older
+    Claude Code versions did. Matching nearby rows, rather than any earlier text, keeps a
+    message the user sends twice."""
+    text = " ".join(queued_text(attachment).split())
+    for row in rows[index + 1 : index + 1 + window]:
+        if row.get("type") == "user":
+            content = (row.get("message") or {}).get("content")
+            if " ".join(REMINDER_RE.sub("", blocks_text(content)).split()) == text:
+                return True
+    return False
 
 
 def parse_claude(path: Path) -> Session:
@@ -311,15 +342,14 @@ def parse_claude(path: Path) -> Session:
     local_command_next = False
     ask_ids: set = set()
     rows = [r for r in read_jsonl(path) if not r.get("isSidechain")]  # sidechains are subagent traffic
-    user_texts = {
-        " ".join(blocks_text((r.get("message") or {}).get("content")).split()) for r in rows if r.get("type") == "user"
-    }
-    for row in rows:
+    for index, row in enumerate(rows):
         cwd = row.get("cwd") or cwd
         content = (row.get("message") or {}).get("content")
         kind = row.get("type")
         if kind == "attachment" and isinstance(row.get("attachment"), dict):
-            items += claude_attachment(row["attachment"], user_texts, images, instruction_files)
+            attachment = row["attachment"]
+            duplicate = attachment.get("type") == "queued_command" and queued_copy_follows(rows, index, attachment)
+            items += claude_attachment(attachment, duplicate, images, instruction_files)
             continue
         if kind == "user":
             if row.get("isCompactSummary"):
@@ -382,9 +412,9 @@ def parse_claude(path: Path) -> Session:
                 elif block.get("type") == "tool_use":
                     if block.get("name") == "AskUserQuestion":
                         ask_ids.add(block.get("id"))
-                        items.append(Item("tool", f"AskUserQuestion: {ask_brief(block.get('input'))}"))
+                        items.append(tool_item("AskUserQuestion", block.get("input"), ask_brief(block.get("input"))))
                     else:
-                        items.append(Item("tool", f"{block.get('name')}: {brief_input(block.get('input'))}"))
+                        items.append(tool_item(str(block.get("name")), block.get("input")))
     return Session("claude", path, cwd, merge_assistant(items), images, instruction_files)
 
 
@@ -410,7 +440,7 @@ def codex_item(item: dict, images: list | None = None) -> list[Item]:
         result = item.get("result")
         result_text = blocks_text(result.get("content")) if isinstance(result, dict) else str(result or "")
         return [
-            Item("tool", f"{item.get('server')}.{item.get('tool')}: {brief_input(item.get('arguments'))}"),
+            tool_item(f"{item.get('server')}.{item.get('tool')}", item.get("arguments")),
             Item("result", result_text or str(item.get("error") or "")),
         ]
     if kind == "FileChange":
@@ -418,7 +448,7 @@ def codex_item(item: dict, images: list | None = None) -> list[Item]:
         if not isinstance(changes, dict):
             changes = {}
         lines = [f"{(c or {}).get('type', 'change')} {p}" for p, c in changes.items()]
-        return [Item("tool", "edit files: " + "; ".join(lines))] if lines else []
+        return [tool_item("edit files", changes, "; ".join(lines))] if lines else []
     if kind == "WebSearch":
         return [Item("tool", f"web search: {item.get('query') or brief_input(item.get('action'))}")]
     if kind == "ImageView":
@@ -428,37 +458,56 @@ def codex_item(item: dict, images: list | None = None) -> list[Item]:
         target = item.get("query") or action.get("url") or brief_input(action)
         return [Item("tool", f"{item.get('kind') or 'extension'}: {target}")]
     if kind == "DynamicToolCall":
-        return [Item("tool", f"{item.get('namespace')}.{item.get('tool')}: {brief_input(item.get('arguments'))}")]
+        call = tool_item(f"{item.get('namespace')}.{item.get('tool')}", item.get("arguments"))
+        output = item.get("content_items") or item.get("output") or item.get("result")
+        if output in (None, "", []):
+            return [call]
+        return [call, Item("result", output if isinstance(output, str) else json.dumps(output, ensure_ascii=False))]
     return []  # reasoning and compaction markers
 
 
 def codex_legacy(rows: list[dict]) -> list[Item]:
-    """Older rollouts and imported threads have no item_completed events."""
+    """Older rollouts and imported threads, which have no item_completed events.
+
+    Messages come from user_message and agent_message events when there are any, since the
+    matching response_item messages include context Codex injects. Tool calls only exist as
+    response_items, so they are always read from there, in file order.
+    """
+    has_events = any(
+        r.get("type") == "event_msg" and (r.get("payload") or {}).get("type") in ("user_message", "agent_message")
+        for r in rows
+    )
     items: list[Item] = []
-    events = [r["payload"] for r in rows if r.get("type") == "event_msg" and isinstance(r.get("payload"), dict)]
-    if any(e.get("type") in ("user_message", "agent_message") for e in events):
-        for e in events:
-            if e.get("type") == "user_message" and e.get("message"):
-                items.append(Item("user", e["message"]))
-            elif e.get("type") == "agent_message" and e.get("message"):
-                items.append(Item("assistant", e["message"]))
-        return items
     for r in rows:
-        p = r.get("payload") or {}
+        p = r.get("payload") if isinstance(r.get("payload"), dict) else {}
+        if r.get("type") == "event_msg" and p.get("message"):
+            if p.get("type") == "user_message":
+                items.append(Item("user", p["message"]))
+            elif p.get("type") == "agent_message":
+                items.append(Item("assistant", p["message"]))
         if r.get("type") != "response_item":
             continue
-        if p.get("type") == "message" and p.get("role") in ("user", "assistant"):
+        if p.get("type") == "message" and p.get("role") in ("user", "assistant") and not has_events:
             text = blocks_text(p.get("content"))
             if p["role"] == "user" and text.lstrip().startswith(CODEX_WRAPPER_PREFIXES):
                 continue
             if text.strip():
                 items.append(Item(p["role"], text))
         elif p.get("type") in ("function_call", "custom_tool_call"):
-            items.append(Item("tool", f"{p.get('name')}: {brief_input(p.get('arguments') or p.get('input'))}"))
+            items.append(tool_item(str(p.get("name")), p.get("arguments") or p.get("input")))
         elif p.get("type") in ("function_call_output", "custom_tool_call_output"):
             out = p.get("output")
             items.append(Item("result", out if isinstance(out, str) else blocks_text(out)))
     return items
+
+
+def is_completed_item(row: dict) -> bool:
+    payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+    return (
+        row.get("type") == "event_msg"
+        and payload.get("type") == "item_completed"
+        and isinstance(payload.get("item"), dict)
+    )
 
 
 def parse_codex(path: Path) -> Session:
@@ -467,18 +516,14 @@ def parse_codex(path: Path) -> Session:
     for r in rows:
         if r.get("type") in ("session_meta", "turn_context"):
             cwd = (r.get("payload") or {}).get("cwd") or cwd
-    completed = [
-        r["payload"]["item"]
-        for r in rows
-        if r.get("type") == "event_msg"
-        and (r.get("payload") or {}).get("type") == "item_completed"
-        and isinstance(r["payload"].get("item"), dict)
-    ]
     images: list = []
-    if completed:
-        items = [i for item in completed for i in codex_item(item, images)]
-    else:
-        items = codex_legacy(rows)
+    # A thread started on an older Codex and continued on a newer one has both formats: the
+    # old one up to the first item_completed event, the new one after it.
+    first = next((i for i, r in enumerate(rows) if is_completed_item(r)), len(rows))
+    items = codex_legacy(rows[:first])
+    for row in rows[first:]:
+        if is_completed_item(row):
+            items += codex_item(row["payload"]["item"], images)
     return Session("codex", path, cwd, merge_assistant(items), images)
 
 
@@ -542,6 +587,19 @@ def find_latest(tool: str, cwd: str) -> Path | None:
     return None
 
 
+def sniff_format(path: Path) -> str:
+    """Which tool wrote a transcript file, from its rows; the folder decides only as a fallback."""
+    try:
+        for _, row in zip(range(20), read_jsonl(path)):
+            if row.get("type") in ("session_meta", "response_item", "event_msg", "turn_context"):
+                return "codex"
+            if row.get("type") in ("user", "assistant", "attachment", "summary", "system"):
+                return "claude"
+    except (OSError, UnicodeDecodeError):
+        pass
+    return "codex" if str(path.resolve()).startswith(str(CODEX_HOME.resolve())) else "claude"
+
+
 def detect_host() -> str:
     in_claude = bool(os.environ.get("CLAUDE_CODE_SESSION_ID"))
     in_codex = bool(os.environ.get("CODEX_THREAD_ID"))
@@ -564,8 +622,7 @@ def resolve_session(args) -> tuple[Session, bool]:
     if args.session:
         path = Path(args.session).expanduser()
         if path.exists():
-            in_codex_home = str(path.resolve()).startswith(str(CODEX_HOME.resolve()))
-            tool = args.source or ("codex" if in_codex_home else "claude")
+            tool = args.source or sniff_format(path)
         else:
             found = [
                 (t, p)
@@ -662,7 +719,7 @@ def render_turn(turn: list[Item], host_name: str, limits: Limits, withhold_reply
     for item in turn:
         if item.starts_turn:
             out.append(f"### {item.heading}\n{clip(item.text, limits.message)}")
-        elif withhold_reply:
+        elif withhold_reply and not item.user_supplied:
             continue
         elif item.role == "summary":
             out.append(
@@ -674,7 +731,8 @@ def render_turn(turn: list[Item], host_name: str, limits: Limits, withhold_reply
         elif not limits.tools:
             continue
         elif item.role == "tool":
-            out.append(f"- tool call: {clip(item.text, limits.tool_input)}")
+            call = item.text if limits.tool_input else (item.detail or item.text)
+            out.append(f"- tool call: {clip(call, limits.tool_input)}")
         elif item.role == "result" and item.text.strip():
             body = clip(item.text, limits.tool_output).replace("\n", "\n  ")
             out.append(f"  result: {body}")
@@ -697,7 +755,9 @@ def render_transcript(turns: list[list[Item]], host_name: str, limits: Limits) -
         used += len(chunk)
     omitted = len(rest) - len(kept)
     note = f"[... {omitted} earlier turns omitted to fit the context budget ...]"
-    return "\n\n".join([first, note, *kept]), omitted
+    transcript = "\n\n".join([first, note, *kept])
+    # The first and newest turns can be larger than the budget on their own.
+    return clip(transcript, budget), omitted
 
 
 @dataclass
@@ -711,16 +771,24 @@ class Request:
     limits: Limits = field(default_factory=Limits)
 
 
-def drop_from_last_typed(turns: list[list[Item]]) -> list[list[Item]]:
-    """Drops the turn of the last message the user typed, and everything after it.
+# How the request shows up in the transcript: "/peer ..." in Claude Code, "$peer ..." in the
+# Codex CLI, and "[$peer](.../SKILL.md) ..." in the Codex app.
+PEER_INVOCATION_RE = re.compile(r"^\s*(?:/peer\b|\$peer\b|\[\$peer\]\()")
 
-    That message is the one that asked for peer. Inputs injected after it (task
-    notifications, messages from other sessions) belong to the peer request too.
+
+def drop_from_last_typed(turns: list[list[Item]]) -> list[list[Item]]:
+    """Drops the message that asked for peer, and everything after it.
+
+    That is the newest typed message that invokes peer, looking back over the last few typed
+    messages in case the user sent another while peer was starting. Without one (the agent
+    called peer on its own, or the user asked in plain words) it is the last typed message.
+    Inputs injected after it (task notifications, messages from other sessions) go too.
     """
-    for index in range(len(turns) - 1, -1, -1):
-        if turns[index][0].role == "user":
+    typed = [index for index, turn in enumerate(turns) if turn[0].role == "user"]
+    for index in reversed(typed[-3:]):
+        if PEER_INVOCATION_RE.match(turns[index][0].text):
             return turns[:index]
-    return turns
+    return turns[: typed[-1]] if typed else turns
 
 
 def build_request(session: Session, peer: str, mode: str, text: str, drop_current: bool, limits: Limits) -> Request:
@@ -752,6 +820,9 @@ def build_request(session: Session, peer: str, mode: str, text: str, drop_curren
             raise PeerError('No earlier message to answer. Ask a question instead: peer "your question"')
         last = turns[-1][0]
         context, omitted = render_transcript(turns[:-1], host_name, limits)
+        # Files and context the user attached to that message go along with it.
+        attached = render_turn([last, *[i for i in turns[-1][1:] if i.user_supplied]], host_name, limits)
+        attached = attached.split("\n", 1)[1] if "\n" in attached else clip(last.text, limits.message)
         if last.role == "user":
             what = "the user's latest message"
         else:
@@ -760,7 +831,7 @@ def build_request(session: Session, peer: str, mode: str, text: str, drop_curren
             f"{intro}\n\n{host_name}'s reply to {what} has been withheld. Write your own reply to it, "
             f"as the assistant in this session would.\n\n"
             f"<transcript>\n{context or '(no earlier turns)'}\n</transcript>\n\n"
-            f'<latest_input from="{last.heading}">\n{clip(last.text, limits.message)}\n</latest_input>'
+            f'<latest_input from="{last.heading}">\n{attached}\n</latest_input>'
         )
         return Request("ask", prompt, last.text, last.heading, len(turns), omitted)
 
@@ -978,9 +1049,10 @@ def config_command(words: list[str]) -> int:
             raise PeerError("Not a setting.\n" + CONFIG_USAGE)
         path = config_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-        tmp.replace(path)
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".peer-config-", suffix=".json")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(config, indent=2) + "\n")
+        os.replace(tmp, path)
         print(show_config())
         return 0
     except (PeerError, OSError) as exc:
@@ -1070,8 +1142,65 @@ def list_models(tools: list[str]) -> str:
     return "\n".join(out)
 
 
+# Codex features that reach outside the folder: connected apps (mail, calendar, GitHub writes),
+# plugins and their MCP servers, browser and computer control. The peer never needs them.
+CODEX_RISKY_FEATURES = (
+    "apps",
+    "plugins",
+    "browser_use",
+    "browser_use_external",
+    "computer_use",
+    "in_app_browser",
+    "in_app_local_automation",
+    "image_generation",
+    "hooks",
+)
+MCP_SERVER_RE = re.compile(r'^\[mcp_servers\.(?:"([^"]+)"|([A-Za-z0-9_-]+))\]\s*$', re.M)
+
+
+def codex_lockdown(binary: str) -> list[str]:
+    """Flags that switch off every Codex tool able to act outside the read-only sandbox.
+
+    Feature names vary between Codex versions and an unknown name is an error, so only the
+    features this Codex reports as enabled are turned off.
+    """
+    flags: list[str] = []
+    try:
+        out = subprocess.run(
+            [binary, "features", "list"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdin=subprocess.DEVNULL,
+            timeout=30,
+            env=child_env(),
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        out = ""
+    enabled = {line.split()[0] for line in out.splitlines() if line.split() and line.split()[-1] == "true"}
+    for feature in CODEX_RISKY_FEATURES:
+        if feature in enabled:
+            flags += ["--disable", feature]
+    try:
+        config = (CODEX_HOME / "config.toml").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        config = ""
+    for quoted, bare in MCP_SERVER_RE.findall(config):
+        name = quoted or bare
+        key = f'"{name}"' if quoted else name
+        flags += ["-c", f"mcp_servers.{key}.enabled=false"]
+    return flags
+
+
 def codex_command(
-    binary: str, cwd: str, out_file: Path, model: str | None, effort: str | None, ephemeral: bool
+    binary: str,
+    cwd: str,
+    out_file: Path,
+    model: str | None,
+    effort: str | None,
+    ephemeral: bool,
+    lockdown: list[str] | None = None,
 ) -> list[str]:
     cmd = [
         binary,
@@ -1085,6 +1214,7 @@ def codex_command(
         cwd,
         "-o",
         str(out_file),
+        *(lockdown or []),
     ]
     if model:
         cmd += ["-m", model]
@@ -1097,17 +1227,25 @@ def codex_command(
 
 
 def claude_command(binary: str, model: str | None, effort: str | None, ephemeral: bool) -> list[str]:
+    """Claude Code in print mode with only reading tools available.
+
+    --tools limits which tools exist at all, so permission rules in the user's settings cannot
+    re-enable Bash or editing. MCP servers, hooks and skills are switched off for the same reason.
+    """
+    tools = ",".join(CLAUDE_READ_ONLY_TOOLS)
     cmd = [
         binary,
         "-p",
         "--output-format",
         "json",
+        "--tools",
+        tools,
         "--allowedTools",
-        *CLAUDE_READ_ONLY_TOOLS,
-        "--disallowedTools",
-        "Edit",
-        "Write",
-        "NotebookEdit",
+        tools,
+        "--strict-mcp-config",
+        "--disable-slash-commands",
+        "--settings",
+        json.dumps({"disableAllHooks": True}),
         "--permission-mode",
         "default",
     ]
@@ -1135,7 +1273,7 @@ def parse_codex_run(returncode: int, stderr: str, text: str, ephemeral: bool) ->
     effort = re.search(r"^reasoning effort:\s*(\S+)", stderr, re.M)
     if returncode != 0 or not text:
         errors = [line for line in stderr.splitlines() if line.startswith("ERROR")] or stderr.splitlines()[-5:]
-        raise PeerError("Codex failed:\n" + "\n".join(errors))
+        raise PeerError("Codex failed:\n" + ("\n".join(errors) or f"exit code {returncode}, no answer"))
     session_id = session.group(1) if session else None
     resume = f"codex resume {session_id}" if session_id and not ephemeral else None
     return Answer(text, session_id, model.group(1) if model else None, effort.group(1) if effort else None, resume)
@@ -1145,15 +1283,60 @@ def parse_claude_run(returncode: int, stdout: str, stderr: str, ephemeral: bool)
     try:
         data = json.loads(stdout)
     except json.JSONDecodeError:
-        raise PeerError("Claude Code failed:\n" + (stderr.strip() or stdout.strip())[-2000:]) from None
+        data = None
+    if not isinstance(data, dict):
+        raise PeerError("Claude Code failed:\n" + (stderr.strip() or stdout.strip())[-2000:])
     if returncode != 0 or data.get("is_error"):
-        raise PeerError(f"Claude Code failed: {data.get('result') or stderr.strip()}")
+        raise PeerError(f"Claude Code failed: {data.get('result') or stderr.strip() or f'exit code {returncode}'}")
+    text = data.get("result")
+    if not isinstance(text, str) or not text.strip():
+        raise PeerError("Claude Code returned no answer.")
     session_id = data.get("session_id")
-    usage = data.get("modelUsage") or {}
+    usage = data.get("modelUsage") if isinstance(data.get("modelUsage"), dict) else {}
     # Claude Code may call a small model for side tasks; the main model writes the most.
     model = max(usage, key=lambda m: (usage[m] or {}).get("outputTokens", 0)) if usage else None
     resume = f"claude --resume {session_id}" if session_id and not ephemeral else None
-    return Answer((data.get("result") or "").strip(), session_id, model, None, resume)
+    return Answer(text.strip(), session_id, model, None, resume)
+
+
+def run_process(cmd: list[str], prompt: str, timeout: int, cwd: str | None, name: str) -> tuple[int, str, str]:
+    """Runs cmd with prompt on stdin. On timeout the whole process group is stopped, so tools the
+    peer started do not outlive it."""
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=child_env(),
+            cwd=cwd,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        raise PeerError(f"Could not start {name}: {exc}") from None
+    try:
+        stdout, stderr = proc.communicate(prompt, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(proc.pid, sig)
+            except OSError:
+                break
+            try:
+                proc.wait(timeout=5)
+                break
+            except subprocess.TimeoutExpired:
+                continue
+        proc.communicate()
+        raise PeerError(f"{name} did not finish within {timeout}s.") from None
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        raise
+    return proc.returncode, stdout, stderr
 
 
 class Run:
@@ -1162,10 +1345,11 @@ class Run:
     def __init__(self, peer: str, cwd: str, model: Setting, effort: Setting, args):
         self.peer, self.cwd, self.model, self.effort, self.args = peer, cwd, model, effort, args
         binary = find_binary(peer)
-        self.tmp = tempfile.TemporaryDirectory() if peer == "codex" else None
+        self.tmp = tempfile.TemporaryDirectory(prefix="peer-") if peer == "codex" else None
         self.out_file = Path(self.tmp.name) / "answer.md" if self.tmp else None
         if peer == "codex":
-            self.cmd = codex_command(binary, cwd, self.out_file, model.value, effort.value, args.ephemeral)
+            lockdown = codex_lockdown(binary)
+            self.cmd = codex_command(binary, cwd, self.out_file, model.value, effort.value, args.ephemeral, lockdown)
         else:
             self.cmd = claude_command(binary, model.value, effort.value, args.ephemeral)
 
@@ -1181,25 +1365,16 @@ class Run:
     def __call__(self, prompt: str) -> Answer:
         name = TOOL_NAMES[self.peer]
         try:
-            proc = subprocess.run(
-                self.cmd,
-                input=prompt,
-                capture_output=True,
-                text=True,
-                env=child_env(),
-                timeout=self.args.timeout,
-                cwd=None if self.peer == "codex" else self.cwd,
-            )
-        except subprocess.TimeoutExpired:
-            raise PeerError(f"{name} did not finish within {self.args.timeout}s.") from None
-        finally:
+            cwd = None if self.peer == "codex" else self.cwd
+            code, stdout, stderr = run_process(self.cmd, prompt, self.args.timeout, cwd, name)
             text = ""
             if self.out_file and self.out_file.exists():
-                text = self.out_file.read_text(encoding="utf-8").strip()
+                text = self.out_file.read_text(encoding="utf-8", errors="replace").strip()
+        finally:
             self.close()
         if self.peer == "codex":
-            return parse_codex_run(proc.returncode, proc.stderr, text, self.args.ephemeral)
-        return parse_claude_run(proc.returncode, proc.stdout, proc.stderr, self.args.ephemeral)
+            return parse_codex_run(code, stderr, text, self.args.ephemeral)
+        return parse_claude_run(code, stdout, stderr, self.args.ephemeral)
 
 
 # ---------------------------------------------------------------- command line
@@ -1346,7 +1521,8 @@ def parse_args(argv: list[str]):
     parser.add_argument("--ephemeral", action="store_true", help="do not keep the peer session")
     parser.add_argument("--timeout", type=int, default=1800, help="seconds to wait (default: 1800)")
     parser.add_argument("--dry-run", action="store_true", help="print the header and prompt instead of sending it")
-    return parser.parse_args(argv)
+    # Intermixed, so options may follow the words: peer review --model gpt-x error handling
+    return parser.parse_intermixed_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
