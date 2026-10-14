@@ -11,14 +11,22 @@ In Claude Code, type `/peer` and Codex answers. In Codex, type `$peer` and Claud
 You need macOS, Python 3.9 or newer, and both Claude Code and Codex installed and signed in. The Codex inside the ChatGPT desktop app works too.
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/sajal2692/peer/main/install.sh | bash
+```
+
+This downloads peer into `~/.local/share/peer` and links the `peer` command and the `/peer` and `$peer` skills. Run the same command again to update.
+
+Or, to install from a clone you keep yourself:
+
+```bash
 git clone https://github.com/sajal2692/peer.git
 cd peer
 ./install.sh
 ```
 
-Restart Claude Code and Codex, then check the install with `peer --version`. If the installer says `~/.local/bin` is not on your PATH, the skills still work. To run `peer` from a terminal, add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile.
+To update a clone, run `git pull` in it.
 
-To update, run `git pull` in the `peer` folder.
+Restart Claude Code and Codex, then check the install with `peer --version`. If the installer says `~/.local/bin` is not on your PATH, the skills still work. To run `peer` from a terminal, add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile.
 
 ## Usage
 
