@@ -66,6 +66,8 @@ jobs:
         with:
           python-version: "3.x"
           allow-prereleases: true
+          # Look past the runner's cached versions for the newest build.
+          check-latest: true
       - run: python --version
       - run: python -W error -m unittest discover -s tests -v
 
