@@ -93,12 +93,6 @@ peer --help                                            # every option
 - **Speed.** An answer takes from a few seconds to several minutes, depending on the model, the effort and the length of the conversation. If a very long conversation fails or is slow, try `--trim`.
 - **Scope.** Claude Code (CLI and desktop app) and Codex (CLI and the ChatGPT app). Regular ChatGPT and claude.ai chats are not supported.
 
-## Troubleshooting
-
-- **`$peer` says Claude Code access is disabled.** The `claude` command-line tool is signed in to an account without Claude Code. The desktop app signs in separately. Run `claude auth login` with the account you use for Claude Code.
-- **Codex says a model is not available.** Run `/peer models` to see the IDs your Codex accepts.
-- **The skill isn't found.** Restart the tool after installing. Check that `~/.claude/skills/peer` and `~/.codex/skills/peer` exist.
-
 ## License
 
 MIT. See [LICENSE](LICENSE). To work on peer itself, see [CONTRIBUTING.md](CONTRIBUTING.md).
