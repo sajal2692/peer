@@ -15,6 +15,9 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Check the tag matches peer's version
         run: |
           version="$(python3 peer.py --version | cut -d' ' -f2)"
