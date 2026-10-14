@@ -8,7 +8,23 @@ uvx ruff@0.17.0 check . && uvx ruff@0.17.0 format --check .
 python3 scripts/check_dashes.py                # the project avoids em dashes
 ```
 
-`peer.py` is a single file that uses only the Python standard library and runs on Python 3.9 or newer. The skills live in `skills/claude/peer` and `skills/codex/peer`. `tests/test_cli.py` runs peer end to end against fake `codex` and `claude` binaries, so the tests need neither tool installed.
+peer uses only the Python standard library and runs on Python 3.9 or newer. `peer.py` is a small launcher that `install.sh` links onto PATH; the code is the `peer` package in `src/peer`:
+
+| Module | What it does |
+|---|---|
+| `cli.py` | The command line: flags, the modes, and printing the answer |
+| `sessions.py` | Finds the session to read: the current one, `--session`, or `--last` |
+| `transcript.py` | The conversation model (`Item`, `Session`) and helpers both readers share |
+| `claude_transcript.py` | Reads a Claude Code transcript |
+| `codex_transcript.py` | Reads a Codex rollout |
+| `request.py` | Turns a session into the prompt: turns, rendering, trimming, the three modes |
+| `runner.py` | Runs the other tool headless and read-only, and parses its answer |
+| `settings.py` | Flags, `PEER_*` variables and the config file, and `peer config` |
+| `models.py` | `peer models` |
+| `output.py` | The header printed above the answer |
+| `common.py` | Tool names, the Claude Code and Codex home folders, `PeerError` |
+
+The skills live in `skills/claude/peer` and `skills/codex/peer`. `tests/test_cli.py` runs peer end to end against fake `codex` and `claude` binaries, so the tests need neither tool installed.
 
 CI runs on every push and pull request: lint, the tests on Ubuntu with Python 3.9, 3.12 and 3.13 and on macOS with Python 3.9, a coverage floor of 80 percent, and a test install into an empty home folder.
 
@@ -34,7 +50,7 @@ Plain text, rather than each tool's own session import, works the same in both d
 
 ## Releasing
 
-1. Update `__version__` in `peer.py` and add a section to `CHANGELOG.md`.
+1. Update `__version__` in `src/peer/__init__.py` and add a section to `CHANGELOG.md`.
 2. Commit, then push a tag that matches: `git tag v0.1.0 && git push origin v0.1.0`.
 3. The release workflow runs the checks and drafts a GitHub release from the changelog section. Review and publish it.
 

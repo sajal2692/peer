@@ -9,9 +9,17 @@ from helpers import (
     claude_user,
     codex_event,
     human,
-    peer,
     write_jsonl,
 )
+
+from peer.claude_transcript import parse_claude
+from peer.cli import parse_args
+from peer.codex_transcript import parse_codex
+from peer.common import PeerError
+from peer.request import Limits, build_request, render_transcript, render_turn, split_turns
+from peer.runner import parse_claude_run
+from peer.sessions import sniff_format
+from peer.transcript import Item
 
 
 def queued(text):
@@ -30,14 +38,14 @@ class RequestRemovalTests(unittest.TestCase):
             codex_event({"type": "UserMessage", "content": [{"type": "text", "text": "[$peer](/x/SKILL.md)"}]}),
             codex_event({"type": "UserMessage", "content": [{"type": "text", "text": "also check perf"}]}),
         ]
-        session = peer.parse_codex(write_jsonl(rows))
-        req = peer.build_request(session, "claude", "ask", "", True, peer.Limits())
+        session = parse_codex(write_jsonl(rows))
+        req = build_request(session, "claude", "ask", "", True, Limits())
         self.assertEqual(req.target, "Is this safe?")
 
     def test_without_an_invocation_the_last_typed_message_is_dropped(self):
         rows = [human("first"), claude_assistant({"type": "text", "text": "a"}), human("ask codex please")]
-        session = peer.parse_claude(write_jsonl(rows))
-        req = peer.build_request(session, "codex", "ask", "", True, peer.Limits())
+        session = parse_claude(write_jsonl(rows))
+        req = build_request(session, "codex", "ask", "", True, Limits())
         self.assertEqual(req.target, "first")
 
     def test_a_repeated_queued_message_is_kept(self):
@@ -50,15 +58,15 @@ class RequestRemovalTests(unittest.TestCase):
             claude_assistant({"type": "text", "text": "C"}),
             human("<command-name>/peer</command-name>"),
         ]
-        session = peer.parse_claude(write_jsonl(rows))
+        session = parse_claude(write_jsonl(rows))
         self.assertEqual([i.text for i in session.items if i.role == "user"], ["continue", "next", "continue", "/peer"])
-        req = peer.build_request(session, "codex", "ask", "", True, peer.Limits())
+        req = build_request(session, "codex", "ask", "", True, Limits())
         self.assertEqual(req.target, "continue")
         self.assertIn("### User\nnext", req.prompt)
 
     def test_a_queued_message_written_twice_is_sent_once(self):
         rows = [queued("hello"), human("hello"), claude_assistant({"type": "text", "text": "hi"})]
-        session = peer.parse_claude(write_jsonl(rows))
+        session = parse_claude(write_jsonl(rows))
         self.assertEqual([i.text for i in session.items if i.role == "user"], ["hello"])
 
 
@@ -77,8 +85,8 @@ class AttachmentTests(unittest.TestCase):
             claude_assistant({"type": "text", "text": "It is about milk."}),
             human("<command-name>/peer</command-name>"),
         ]
-        session = peer.parse_claude(write_jsonl(rows))
-        req = peer.build_request(session, "codex", "ask", "", True, peer.Limits())
+        session = parse_claude(write_jsonl(rows))
+        req = build_request(session, "codex", "ask", "", True, Limits())
         latest = req.prompt.split("<latest_input", 1)[1]
         self.assertIn("attached file: /p/notes.md", latest)
         self.assertIn("the milk", latest)
@@ -93,7 +101,7 @@ class CodexFormatTests(unittest.TestCase):
             {"type": "event_msg", "payload": {"type": "agent_message", "message": "old answer"}},
             codex_event({"type": "UserMessage", "content": [{"type": "text", "text": "new question"}]}),
         ]
-        texts = [i.text for i in peer.parse_codex(write_jsonl(rows)).items]
+        texts = [i.text for i in parse_codex(write_jsonl(rows)).items]
         self.assertEqual(texts, ["old question", "old answer", "new question"])
 
     def test_legacy_events_keep_tool_calls(self):
@@ -114,7 +122,7 @@ class CodexFormatTests(unittest.TestCase):
             },
             {"type": "event_msg", "payload": {"type": "agent_message", "message": "All green."}},
         ]
-        items = [(i.role, i.text) for i in peer.parse_codex(write_jsonl(rows)).items]
+        items = [(i.role, i.text) for i in parse_codex(write_jsonl(rows)).items]
         self.assertEqual([r for r, _ in items], ["user", "tool", "result", "assistant"])
         self.assertIn(("result", "3 passed"), items)
 
@@ -123,16 +131,16 @@ class CodexFormatTests(unittest.TestCase):
             {"type": "session_meta", "payload": {"cwd": "/proj"}},
             codex_event({"type": "UserMessage", "content": [{"type": "text", "text": "hi"}]}),
         ]
-        self.assertEqual(peer.sniff_format(write_jsonl(rows)), "codex")
-        self.assertEqual(peer.sniff_format(write_jsonl([claude_user("hi")])), "claude")
+        self.assertEqual(sniff_format(write_jsonl(rows)), "codex")
+        self.assertEqual(sniff_format(write_jsonl([claude_user("hi")])), "claude")
 
 
 class LimitRegressionTests(unittest.TestCase):
     def test_budget_is_a_real_cap(self):
         items = []
         for n in range(4):
-            items += [peer.Item("user", f"q{n} " + "x" * 1000), peer.Item("assistant", "y" * 1000)]
-        transcript, _ = peer.render_transcript(peer.split_turns(items), "Codex", peer.Limits(budget=500))
+            items += [Item("user", f"q{n} " + "x" * 1000), Item("assistant", "y" * 1000)]
+        transcript, _ = render_transcript(split_turns(items), "Codex", Limits(budget=500))
         self.assertLessEqual(len(transcript), 560)  # the budget plus the cut marker
 
     def test_untrimmed_tool_calls_keep_every_argument(self):
@@ -147,23 +155,23 @@ class LimitRegressionTests(unittest.TestCase):
                 }
             ),
         ]
-        session = peer.parse_claude(write_jsonl(rows))
-        full = peer.render_turn(peer.split_turns(session.items)[0], "Claude Code", peer.Limits())
+        session = parse_claude(write_jsonl(rows))
+        full = render_turn(split_turns(session.items)[0], "Claude Code", Limits())
         self.assertIn('"old_string": "foo"', full)
-        brief = peer.render_turn(peer.split_turns(session.items)[0], "Claude Code", peer.Limits.trimmed())
+        brief = render_turn(split_turns(session.items)[0], "Claude Code", Limits.trimmed())
         self.assertIn("- tool call: Edit: /p/a.py", brief)
         self.assertNotIn("old_string", brief)
 
 
 class CommandLineTests(Sandbox):
     def test_options_may_follow_the_words(self):
-        args = peer.parse_args(["review", "--model", "gpt-x", "error", "handling"])
+        args = parse_args(["review", "--model", "gpt-x", "error", "handling"])
         self.assertEqual((args.words, args.model), (["review", "error", "handling"], "gpt-x"))
 
     def test_bad_claude_output_is_an_error(self):
         for stdout in ("{}", "[]", json.dumps({"result": "  "})):
-            with self.assertRaises(peer.PeerError):
-                peer.parse_claude_run(0, stdout, "", False)
+            with self.assertRaises(PeerError):
+                parse_claude_run(0, stdout, "", False)
 
 
 if __name__ == "__main__":

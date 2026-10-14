@@ -10,6 +10,7 @@
 - `review` works when the reply was only tool calls, and the header says "Reviewing the reply to" in review mode.
 - The Claude Code skill runs peer in the foreground, falling back to the background for long runs.
 - One-line install: `curl -fsSL https://raw.githubusercontent.com/sajal2692/peer/main/install.sh | bash` downloads peer into `~/.local/share/peer` and links it. Running it again updates.
+- The code is now split into modules in `src/peer`, with `peer.py` as a small launcher. Nothing changes in how you install or run peer.
 
 ## 0.1.0
 
