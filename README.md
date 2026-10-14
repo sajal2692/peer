@@ -48,34 +48,27 @@ Continue with Codex: codex resume 01a137ed-...
 
 Run the `Continue with` command in a terminal to keep talking to the other tool.
 
-### Options
+### Options and settings
 
-Add these after `/peer` or `$peer`:
+Add options after `/peer` or `$peer` for one call:
 
 | Option | Effect |
 |---|---|
-| `--model <id>`, `--effort <level>` | Pick the other tool's model and reasoning effort for this call. |
+| `--model <id>`, `--effort <level>` | Pick the other tool's model and reasoning effort. |
 | `--assess` | After the answer, your tool compares the two answers and gives a verdict. |
-| `--details` | Show the full run: the exact commands, which message was answered, and how much context was sent. |
-| `--trim` | Shorten long messages and tool output before sending. By default the whole conversation is sent. |
-| `--max-message N`, `--max-tool-input N`, `--max-tool-output N`, `--budget N`, `--no-tools` | Trim one part only. `--budget` caps the whole transcript in characters. |
+| `--details` | Show the full run: the exact commands, which message was answered, and how much was sent. |
+| `--trim` | Shorten long messages and tool output. By default the whole conversation is sent. |
 
-### Settings
-
-Save defaults so you don't repeat flags. Settings are shared between both tools.
+Or save defaults for every call. Saved settings are shared between both tools:
 
 | Command | Effect |
 |---|---|
 | `/peer models` | List the models and effort levels you can use. |
 | `/peer config` | Show the current settings. |
-| `/peer config codex model gpt-5.5` | Use this model whenever Codex answers. |
-| `/peer config claude model opus` | Use this model whenever Claude Code answers. |
-| `/peer config codex effort high` | Set the effort whenever Codex answers (`claude effort` for Claude Code). |
-| `/peer config codex model default` | Go back to the tool's own default. |
+| `/peer config codex model gpt-5.5` | Use this model whenever Codex answers (`claude model` for Claude Code). |
 | `/peer config assess on` | Always add the assessment. `details` and `trim` work the same way. |
-| `/peer config budget 600000` | Always cap the transcript at this many characters. |
 
-`codex` and `claude` name the tool that answers, not the one you are in. In Codex, type `$peer config ...`. Settings are saved in `~/.config/peer/config.json`.
+See [docs/configuration.md](docs/configuration.md) for every option, the config file and environment variables.
 
 ### From a terminal
 

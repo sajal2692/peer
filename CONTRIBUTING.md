@@ -38,4 +38,4 @@ Plain text, rather than each tool's own session import, works the same in both d
 2. Commit, then push a tag that matches: `git tag v0.1.0 && git push origin v0.1.0`.
 3. The release workflow runs the checks and drafts a GitHub release from the changelog section. Review and publish it.
 
-Keep `README.md` about installing and using peer. Implementation notes belong here.
+Keep `README.md` about installing and using peer, `docs/configuration.md` complete for every option and setting, and implementation notes here.
