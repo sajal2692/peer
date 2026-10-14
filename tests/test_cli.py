@@ -233,7 +233,7 @@ class SessionDiscoveryTests(CliTestCase):
         code, _, err = self.run_main("hello")
         self.assertEqual(code, 1)
         self.assertIn("pass --to claude or --to codex", err)
-        code, out, _ = self.run_main("--to", "codex", "hello")
+        code, _, _ = self.run_main("--to", "codex", "hello")
         self.assertEqual(code, 0)
         self.assertTrue(self.recorded()["prompt"].endswith("hello"))
 

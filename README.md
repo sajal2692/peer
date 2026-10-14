@@ -217,7 +217,13 @@ MIT. See [LICENSE](LICENSE).
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests
+python3 -m unittest discover -s tests          # the test suite, no packages needed
+uvx ruff@0.17.0 check . && uvx ruff@0.17.0 format --check .
+python3 scripts/check_dashes.py                # the project avoids em dashes
 ```
 
-The tests also run on GitHub Actions, on macOS and Ubuntu with Python 3.9 and 3.12. `peer.py` is a single file that uses only the Python standard library and runs on Python 3.9 or newer. The skills live in `skills/claude/peer` and `skills/codex/peer`. Update this README whenever behaviour, options or output change.
+`peer.py` is a single file that uses only the Python standard library and runs on Python 3.9 or newer. The skills live in `skills/claude/peer` and `skills/codex/peer`. The tests in `tests/test_cli.py` run peer end to end against fake `codex` and `claude` binaries, so they need neither tool installed.
+
+CI runs on every push and pull request: lint, the tests on macOS and Ubuntu with Python 3.9, 3.12 and 3.13, and a coverage check. Pushing a `v*` tag that matches `peer --version` runs the same checks and drafts a GitHub release from that version's section of `CHANGELOG.md`.
+
+Update this README and `CHANGELOG.md` whenever behaviour, options or output change.
