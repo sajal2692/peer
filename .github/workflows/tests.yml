@@ -48,6 +48,14 @@ jobs:
           bash install.sh
           "$HOME/.local/bin/peer" --version
           test -L "$HOME/.claude/skills/peer" && test -L "$HOME/.codex/skills/peer"
+      - name: Install with the one-line installer, then update
+        run: |
+          export HOME="$(mktemp -d)" PEER_REPO_URL="$PWD"
+          git config --global --add safe.directory '*'
+          bash < install.sh
+          bash < install.sh
+          "$HOME/.local/bin/peer" --version
+          test -d "$HOME/.local/share/peer/.git"
 
   coverage:
     runs-on: ubuntu-latest

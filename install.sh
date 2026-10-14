@@ -2,7 +2,32 @@
 # Links peer onto PATH and installs the /peer (Claude Code) and $peer (Codex) skills.
 set -euo pipefail
 
-repo="$(cd "$(dirname "$0")" && pwd)"
+# Run from a clone, this installs that clone. Piped from curl, it first clones peer into
+# ~/.local/share/peer (or updates that clone) and then installs from there:
+#   curl -fsSL https://raw.githubusercontent.com/sajal2692/peer/main/install.sh | bash
+source_file="${BASH_SOURCE[0]:-}"
+if [ -n "$source_file" ] && [ -f "$(dirname "$source_file")/peer.py" ]; then
+  repo="$(cd "$(dirname "$source_file")" && pwd)"
+else
+  url="${PEER_REPO_URL:-https://github.com/sajal2692/peer.git}"
+  dest="${PEER_INSTALL_DIR:-$HOME/.local/share/peer}"
+  if ! command -v git >/dev/null 2>&1; then
+    echo "error: git is needed to download peer" >&2
+    exit 1
+  fi
+  if [ -d "$dest/.git" ]; then
+    echo "Updating $dest"
+    git -C "$dest" pull --ff-only --quiet
+  elif [ -e "$dest" ]; then
+    echo "error: $dest exists and is not a peer clone; move it aside or set PEER_INSTALL_DIR" >&2
+    exit 1
+  else
+    echo "Downloading peer into $dest"
+    mkdir -p "$(dirname "$dest")"
+    git clone --quiet "$url" "$dest"
+  fi
+  exec bash "$dest/install.sh"
+fi
 bin_dir="$HOME/.local/bin"
 claude_home="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 codex_home="${CODEX_HOME:-$HOME/.codex}"

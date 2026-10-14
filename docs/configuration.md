@@ -92,6 +92,7 @@ Every key is optional.
 | `PEER_ASSESS`, `PEER_DETAILS`, `PEER_TRIM` | `1` for on, `0` for off. |
 | `PEER_CONFIG` | Use a different config file. |
 | `PEER_CODEX_BIN`, `PEER_CLAUDE_BIN` | Use a specific `codex` or `claude` binary. By default peer picks the newest it can find, including the Codex inside the ChatGPT app. |
+| `PEER_INSTALL_DIR` | Where the one-line installer keeps its copy of peer. The default is `~/.local/share/peer`. |
 | `CLAUDE_CONFIG_DIR`, `CODEX_HOME` | Where Claude Code and Codex keep their sessions, if not `~/.claude` and `~/.codex`. |
 
 The desktop apps usually don't read your shell profile, so the config file is the more reliable choice there.
