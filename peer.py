@@ -13,9 +13,11 @@ Modes:
                             conversation so far as context (or none, in a new
                             session)
 """
+
 from __future__ import annotations
 
 import argparse
+import base64
 import glob
 import json
 import os
@@ -25,10 +27,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-import base64
 from pathlib import Path
-from typing import Iterable, Iterator
 
 __version__ = "0.1.0"
 
@@ -49,22 +50,39 @@ CLAUDE_FALLBACKS = [str(Path.home() / ".local/bin/claude"), str(Path.home() / ".
 
 # Tools the Claude peer may use. Everything else is denied in print mode.
 CLAUDE_READ_ONLY_TOOLS = [
-    "Read", "Grep", "Glob", "WebSearch", "WebFetch",
-    "Bash(git status:*)", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)",
+    "Read",
+    "Grep",
+    "Glob",
+    "WebSearch",
+    "WebFetch",
+    "Bash(git status:*)",
+    "Bash(git log:*)",
+    "Bash(git diff:*)",
+    "Bash(git show:*)",
 ]
 
 # Session-specific variables that must not leak into the peer process.
 SCRUB_EXACT = {
-    "CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT", "CLAUDE_PLUGIN_ROOT", "CLAUDE_PLUGIN_DATA",
-    "CODEX_THREAD_ID", "AI_AGENT",
+    "CLAUDECODE",
+    "CLAUDE_PID",
+    "CLAUDE_EFFORT",
+    "CLAUDE_PLUGIN_ROOT",
+    "CLAUDE_PLUGIN_DATA",
+    "CODEX_THREAD_ID",
+    "AI_AGENT",
 }
 SCRUB_PREFIXES = ("CLAUDE_CODE_", "CLAUDE_AGENT_SDK", "CODEX_COMPANION_")
 SCRUB_KEEP_PREFIXES = ("CLAUDE_CODE_USE_",)
 
 # Codex injects these as user-role messages; they are not things the user typed.
 CODEX_WRAPPER_PREFIXES = (
-    "# AGENTS.md instructions", "<environment_context>", "<user_instructions>",
-    "<permissions instructions>", "<external_", "<turn_aborted>", "<skills_instructions>",
+    "# AGENTS.md instructions",
+    "<environment_context>",
+    "<user_instructions>",
+    "<permissions instructions>",
+    "<external_",
+    "<turn_aborted>",
+    "<skills_instructions>",
     "<collaboration_mode>",
 )
 
@@ -164,6 +182,7 @@ def blocks_text(content, images: list | None = None) -> str:
 
 def save_images(prompt: str, images: list, folder: Path) -> str:
     """Writes the images the prompt refers to into folder and points the prompt at the files."""
+
     def write(match):
         index = int(match.group(1))
         if index >= len(images):
@@ -175,6 +194,7 @@ def save_images(prompt: str, images: list, folder: Path) -> str:
         except (ValueError, OSError):
             return "[image]"
         return f"[image: {target}]"
+
     return IMAGE_REF_RE.sub(write, prompt)
 
 
@@ -232,8 +252,7 @@ def ask_brief(value) -> str:
     return brief_input(value)
 
 
-def claude_attachment(attachment: dict, user_texts: set, images: list,
-                      instruction_files: list) -> list[Item]:
+def claude_attachment(attachment: dict, user_texts: set, images: list, instruction_files: list) -> list[Item]:
     """Context Claude Code adds through attachment rows rather than user messages."""
     kind = attachment.get("type")
     if kind == "queued_command":
@@ -256,8 +275,15 @@ def claude_attachment(attachment: dict, user_texts: set, images: list,
         content = attachment.get("content") if isinstance(attachment.get("content"), dict) else {}
         name = attachment.get("filename") or ""
         if content.get("type") == "image":
-            ref = image_ref({"source": {"media_type": (content.get("file") or {}).get("type"),
-                                        "data": (content.get("file") or {}).get("base64")}}, images)
+            ref = image_ref(
+                {
+                    "source": {
+                        "media_type": (content.get("file") or {}).get("type"),
+                        "data": (content.get("file") or {}).get("base64"),
+                    }
+                },
+                images,
+            )
             return [Item("tool", f"attached image: {name}"), Item("result", ref if ref != "[image]" else name)]
         body = (content.get("file") or {}).get("content") if isinstance(content.get("file"), dict) else None
         return [Item("tool", f"attached file: {name}"), Item("result", body if isinstance(body, str) else "")]
@@ -286,8 +312,7 @@ def parse_claude(path: Path) -> Session:
     ask_ids: set = set()
     rows = [r for r in read_jsonl(path) if not r.get("isSidechain")]  # sidechains are subagent traffic
     user_texts = {
-        " ".join(blocks_text((r.get("message") or {}).get("content")).split())
-        for r in rows if r.get("type") == "user"
+        " ".join(blocks_text((r.get("message") or {}).get("content")).split()) for r in rows if r.get("type") == "user"
     }
     for row in rows:
         cwd = row.get("cwd") or cwd
@@ -315,8 +340,10 @@ def parse_claude(path: Path) -> Session:
                     if label and text:
                         items.append(Item("input", text, label))
                 continue
-            if isinstance(content, list) and content and all(
-                isinstance(b, dict) and b.get("type") == "tool_result" for b in content
+            if (
+                isinstance(content, list)
+                and content
+                and all(isinstance(b, dict) and b.get("type") == "tool_result" for b in content)
             ):
                 for block in content:
                     text = blocks_text(block.get("content"))
@@ -388,7 +415,9 @@ def codex_item(item: dict, images: list | None = None) -> list[Item]:
         ]
     if kind == "FileChange":
         changes = item.get("changes") or {}
-        lines = [f"{(c or {}).get('type', 'change')} {p}" for p, c in changes.items()] if isinstance(changes, dict) else []
+        if not isinstance(changes, dict):
+            changes = {}
+        lines = [f"{(c or {}).get('type', 'change')} {p}" for p, c in changes.items()]
         return [Item("tool", "edit files: " + "; ".join(lines))] if lines else []
     if kind == "WebSearch":
         return [Item("tool", f"web search: {item.get('query') or brief_input(item.get('action'))}")]
@@ -485,9 +514,9 @@ def is_peer_session(path: Path) -> bool:
             if row.get("type") == "user":  # Claude Code
                 return blocks_text((row.get("message") or {}).get("content")).startswith(MARKER)
             payload = row.get("payload") or {}
-            if payload.get("type") == "message" and payload.get("role") == "user":  # Codex
-                if blocks_text(payload.get("content")).startswith(MARKER):
-                    return True
+            is_user_message = payload.get("type") == "message" and payload.get("role") == "user"  # Codex
+            if is_user_message and blocks_text(payload.get("content")).startswith(MARKER):
+                return True
     except OSError:
         pass
     return False
@@ -538,8 +567,11 @@ def resolve_session(args) -> tuple[Session, bool]:
             in_codex_home = str(path.resolve()).startswith(str(CODEX_HOME.resolve()))
             tool = args.source or ("codex" if in_codex_home else "claude")
         else:
-            found = [(t, p) for t, p in (("claude", find_claude_by_id(args.session)),
-                                         ("codex", find_codex_by_id(args.session))) if p]
+            found = [
+                (t, p)
+                for t, p in (("claude", find_claude_by_id(args.session)), ("codex", find_codex_by_id(args.session)))
+                if p
+            ]
             found = [(t, p) for t, p in found if not args.source or t == args.source]
             if not found:
                 raise PeerError(f"No session file or id matches {args.session!r}.")
@@ -560,7 +592,10 @@ def resolve_session(args) -> tuple[Session, bool]:
     if not path:
         path = find_latest(tool, cwd)
         if path:
-            print(f"peer: no session id from {TOOL_NAMES[tool]}; using the newest session for this folder.", file=sys.stderr)
+            print(
+                f"peer: no session id from {TOOL_NAMES[tool]}; using the newest session for this folder.",
+                file=sys.stderr,
+            )
     if not path:
         raise PeerError(f"Could not find the current {TOOL_NAMES[tool]} session transcript.")
     return parse_session(tool, path), True
@@ -591,6 +626,7 @@ def clip(text: str, limit: int) -> str:
 @dataclass
 class Limits:
     """How much of the transcript to send, in characters. 0 means no limit; the default sends it all."""
+
     message: int = 0
     tool_input: int = 0
     tool_output: int = 0
@@ -599,7 +635,7 @@ class Limits:
     tools: bool = True
 
     @classmethod
-    def trimmed(cls, **overrides) -> "Limits":
+    def trimmed(cls, **overrides) -> Limits:
         return cls(**{**TRIM_DEFAULTS, **overrides})
 
     def describe(self) -> str:
@@ -607,9 +643,17 @@ class Limits:
             return "everything except tool activity"
         if not any((self.message, self.tool_input, self.tool_output, self.summary, self.budget)):
             return "everything, untrimmed"
-        parts = [f"{name.replace('_', ' ')} {value:,}" for name, value in (
-            ("message", self.message), ("tool_input", self.tool_input), ("tool_output", self.tool_output),
-            ("summary", self.summary), ("budget", self.budget)) if value]
+        parts = [
+            f"{name.replace('_', ' ')} {value:,}"
+            for name, value in (
+                ("message", self.message),
+                ("tool_input", self.tool_input),
+                ("tool_output", self.tool_output),
+                ("summary", self.summary),
+                ("budget", self.budget),
+            )
+            if value
+        ]
         return "trimmed: " + ", ".join(parts) + ("" if self.tools else ", no tool activity")
 
 
@@ -621,8 +665,10 @@ def render_turn(turn: list[Item], host_name: str, limits: Limits, withhold_reply
         elif withhold_reply:
             continue
         elif item.role == "summary":
-            out.append(f"### {SUMMARY_LABEL}\n({host_name} wrote this summary of the turns above when "
-                       f"the session was compacted; it carried on from it.)\n{clip(item.text, limits.summary)}")
+            out.append(
+                f"### {SUMMARY_LABEL}\n({host_name} wrote this summary of the turns above when "
+                f"the session was compacted; it carried on from it.)\n{clip(item.text, limits.summary)}"
+            )
         elif item.role == "assistant":
             out.append(f"### {host_name}\n{clip(item.text, limits.message)}")
         elif not limits.tools:
@@ -651,7 +697,7 @@ def render_transcript(turns: list[list[Item]], host_name: str, limits: Limits) -
         used += len(chunk)
     omitted = len(rest) - len(kept)
     note = f"[... {omitted} earlier turns omitted to fit the context budget ...]"
-    return "\n\n".join([first, note] + kept), omitted
+    return "\n\n".join([first, note, *kept]), omitted
 
 
 @dataclass
@@ -677,8 +723,7 @@ def drop_from_last_typed(turns: list[list[Item]]) -> list[list[Item]]:
     return turns
 
 
-def build_request(session: Session, peer: str, mode: str, text: str, drop_current: bool,
-                  limits: Limits) -> Request:
+def build_request(session: Session, peer: str, mode: str, text: str, drop_current: bool, limits: Limits) -> Request:
     host_name, peer_name = TOOL_NAMES[session.tool], TOOL_NAMES[peer]
     cwd = session.cwd or os.getcwd()
     turns = split_turns(session.items)
@@ -692,13 +737,15 @@ def build_request(session: Session, peer: str, mode: str, text: str, drop_curren
         f"working directory: read files to check facts, but do not modify anything, do not run "
         f"commands with side effects, and do not ask the user questions. If something is ambiguous, "
         f"state your assumption and continue. Do not comment on this setup or the transcript format. "
-        f"Headings other than \"User\" and \"{host_name}\" mark inputs the system injected, such as "
+        f'Headings other than "User" and "{host_name}" mark inputs the system injected, such as '
         f"task notifications or messages from other sessions; the user did not type them. Images "
         f"appear as [image: path]; open the file when it matters."
     )
     if session.instruction_files:
-        intro += (f"\n{host_name} was also following these instruction files; read them when they bear on "
-                  f"the answer: " + ", ".join(session.instruction_files))
+        intro += (
+            f"\n{host_name} was also following these instruction files; read them when they bear on "
+            f"the answer: " + ", ".join(session.instruction_files)
+        )
 
     if mode == "ask":
         if not turns or not turns[-1][0].starts_turn:
@@ -713,7 +760,7 @@ def build_request(session: Session, peer: str, mode: str, text: str, drop_curren
             f"{intro}\n\n{host_name}'s reply to {what} has been withheld. Write your own reply to it, "
             f"as the assistant in this session would.\n\n"
             f"<transcript>\n{context or '(no earlier turns)'}\n</transcript>\n\n"
-            f"<latest_input from=\"{last.heading}\">\n{clip(last.text, limits.message)}\n</latest_input>"
+            f'<latest_input from="{last.heading}">\n{clip(last.text, limits.message)}\n</latest_input>'
         )
         return Request("ask", prompt, last.text, last.heading, len(turns), omitted)
 
@@ -792,7 +839,6 @@ def find_binary(tool: str) -> str:
     return max(candidates, key=version_of)
 
 
-
 @dataclass
 class Setting:
     value: str | None
@@ -810,7 +856,7 @@ def load_config() -> dict:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise PeerError(f"Could not read {path}: {exc}")
+        raise PeerError(f"Could not read {path}: {exc}") from None
     if not isinstance(data, dict):
         raise PeerError(f"{path} must hold a JSON object.")
     return data
@@ -887,8 +933,9 @@ def show_config() -> str:
                 parts.append(f"{key} {setting.value} (from {setting.source})")
             else:
                 own = own_default(tool, key)
-                parts.append(f"{key} {own} ({TOOL_NAMES[tool]}'s own config)" if own
-                             else f"{key}: {TOOL_NAMES[tool]}'s default")
+                parts.append(
+                    f"{key} {own} ({TOOL_NAMES[tool]}'s own config)" if own else f"{key}: {TOOL_NAMES[tool]}'s default"
+                )
         lines.append(f"When {TOOL_NAMES[tool]} answers: " + ", ".join(parts))
     for key, label in (("assess", "Assessment"), ("details", "Full header")):
         setting = resolve_switch(key, None, config)
@@ -899,7 +946,7 @@ def show_config() -> str:
     budget = config.get("budget") if isinstance(config.get("budget"), int) else None
     if budget:
         lines.append(f"Context budget: {budget:,} characters (from peer config)")
-    return "\n".join(lines + ["", CONFIG_USAGE])
+    return "\n".join([*lines, "", CONFIG_USAGE])
 
 
 def config_command(words: list[str]) -> int:
@@ -952,11 +999,12 @@ CLAUDE_ALIASES = [
 def codex_models(binary: str) -> list[dict]:
     """Codex's own model catalog, the list its model picker shows, best first."""
     try:
-        out = subprocess.run([binary, "debug", "models"], capture_output=True, text=True, timeout=60,
-                             env=child_env()).stdout
+        out = subprocess.run(
+            [binary, "debug", "models"], capture_output=True, text=True, timeout=60, env=child_env()
+        ).stdout
         models = json.loads(out).get("models") or []
     except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
-        raise PeerError("Could not read Codex's model list (codex debug models failed).")
+        raise PeerError("Could not read Codex's model list (codex debug models failed).") from None
     shown = [m for m in models if isinstance(m, dict) and m.get("slug") and m.get("visibility") == "list"]
     return sorted(shown, key=lambda m: m.get("priority", 999))
 
@@ -1007,7 +1055,7 @@ def list_models(tools: list[str]) -> str:
             out.append("Models when Claude Code answers (aliases always point at the newest version):")
             rows = CLAUDE_ALIASES + [(v, d) for v, d in claude_extra_models() if v not in dict(CLAUDE_ALIASES)]
             width = max(len(v) for v, _ in rows)
-            for index, (value, note) in enumerate(rows):
+            for value, note in rows:
                 # peer's pick for a second opinion: strong, and quicker than Fable.
                 tags = (["recommended"] if value == "opus" else []) + (["current"] if value == current else [])
                 out.append(f"  {value:<{width}}  {note}" + (f"  [{', '.join(tags)}]" if tags else ""))
@@ -1016,15 +1064,28 @@ def list_models(tools: list[str]) -> str:
             if not current:
                 out.append("  current: Claude Code's default")
         out.append("")
-    out.append("Set one: peer config codex model <id>, peer config claude model <alias>, "
-               "or for one call: peer --model <id>")
+    out.append(
+        "Set one: peer config codex model <id>, peer config claude model <alias>, or for one call: peer --model <id>"
+    )
     return "\n".join(out)
 
 
-def codex_command(binary: str, cwd: str, out_file: Path, model: str | None, effort: str | None,
-                  ephemeral: bool) -> list[str]:
-    cmd = [binary, "exec", "--sandbox", "read-only", "--skip-git-repo-check", "--color", "never",
-           "-C", cwd, "-o", str(out_file)]
+def codex_command(
+    binary: str, cwd: str, out_file: Path, model: str | None, effort: str | None, ephemeral: bool
+) -> list[str]:
+    cmd = [
+        binary,
+        "exec",
+        "--sandbox",
+        "read-only",
+        "--skip-git-repo-check",
+        "--color",
+        "never",
+        "-C",
+        cwd,
+        "-o",
+        str(out_file),
+    ]
     if model:
         cmd += ["-m", model]
     if effort:
@@ -1036,8 +1097,20 @@ def codex_command(binary: str, cwd: str, out_file: Path, model: str | None, effo
 
 
 def claude_command(binary: str, model: str | None, effort: str | None, ephemeral: bool) -> list[str]:
-    cmd = [binary, "-p", "--output-format", "json", "--allowedTools", *CLAUDE_READ_ONLY_TOOLS,
-           "--disallowedTools", "Edit", "Write", "NotebookEdit", "--permission-mode", "default"]
+    cmd = [
+        binary,
+        "-p",
+        "--output-format",
+        "json",
+        "--allowedTools",
+        *CLAUDE_READ_ONLY_TOOLS,
+        "--disallowedTools",
+        "Edit",
+        "Write",
+        "NotebookEdit",
+        "--permission-mode",
+        "default",
+    ]
     if model:
         cmd += ["--model", model]
     if effort:
@@ -1061,19 +1134,18 @@ def parse_codex_run(returncode: int, stderr: str, text: str, ephemeral: bool) ->
     model = re.search(r"^model:\s*(\S+)", stderr, re.M)
     effort = re.search(r"^reasoning effort:\s*(\S+)", stderr, re.M)
     if returncode != 0 or not text:
-        errors = [l for l in stderr.splitlines() if l.startswith("ERROR")] or stderr.splitlines()[-5:]
+        errors = [line for line in stderr.splitlines() if line.startswith("ERROR")] or stderr.splitlines()[-5:]
         raise PeerError("Codex failed:\n" + "\n".join(errors))
     session_id = session.group(1) if session else None
     resume = f"codex resume {session_id}" if session_id and not ephemeral else None
-    return Answer(text, session_id, model.group(1) if model else None,
-                  effort.group(1) if effort else None, resume)
+    return Answer(text, session_id, model.group(1) if model else None, effort.group(1) if effort else None, resume)
 
 
 def parse_claude_run(returncode: int, stdout: str, stderr: str, ephemeral: bool) -> Answer:
     try:
         data = json.loads(stdout)
     except json.JSONDecodeError:
-        raise PeerError("Claude Code failed:\n" + (stderr.strip() or stdout.strip())[-2000:])
+        raise PeerError("Claude Code failed:\n" + (stderr.strip() or stdout.strip())[-2000:]) from None
     if returncode != 0 or data.get("is_error"):
         raise PeerError(f"Claude Code failed: {data.get('result') or stderr.strip()}")
     session_id = data.get("session_id")
@@ -1109,10 +1181,17 @@ class Run:
     def __call__(self, prompt: str) -> Answer:
         name = TOOL_NAMES[self.peer]
         try:
-            proc = subprocess.run(self.cmd, input=prompt, capture_output=True, text=True, env=child_env(),
-                                  timeout=self.args.timeout, cwd=None if self.peer == "codex" else self.cwd)
+            proc = subprocess.run(
+                self.cmd,
+                input=prompt,
+                capture_output=True,
+                text=True,
+                env=child_env(),
+                timeout=self.args.timeout,
+                cwd=None if self.peer == "codex" else self.cwd,
+            )
         except subprocess.TimeoutExpired:
-            raise PeerError(f"{name} did not finish within {self.args.timeout}s.")
+            raise PeerError(f"{name} did not finish within {self.args.timeout}s.") from None
         finally:
             text = ""
             if self.out_file and self.out_file.exists():
@@ -1132,8 +1211,12 @@ def resolve_limits(args, config: dict) -> Limits:
     limits = Limits.trimmed() if resolve_switch("trim", args.trim, config).value == "on" else Limits()
     if isinstance(config.get("budget"), int) and args.budget is None:
         limits.budget = config["budget"]
-    for flag, name in (("max_message", "message"), ("max_tool_input", "tool_input"),
-                       ("max_tool_output", "tool_output"), ("budget", "budget")):
+    for flag, name in (
+        ("max_message", "message"),
+        ("max_tool_input", "tool_input"),
+        ("max_tool_output", "tool_output"),
+        ("budget", "budget"),
+    ):
         value = getattr(args, flag)
         if value is not None:
             setattr(limits, name, max(value, 0))
@@ -1177,8 +1260,9 @@ def short_header(run: Run, request: Request, answer: Answer | None, assess: Sett
     return "\n".join(lines)
 
 
-def header(argv: list[str], run: Run, request: Request, session: Session, mode: str,
-           answer: Answer | None, assess: Setting) -> str:
+def header(
+    argv: list[str], run: Run, request: Request, session: Session, mode: str, answer: Answer | None, assess: Setting
+) -> str:
     host, peer = TOOL_NAMES[session.tool], TOOL_NAMES[run.peer]
     sent = request.turns_sent - request.turns_omitted
     turns = "1 turn" if sent == 1 else f"{sent} turns"
@@ -1218,28 +1302,47 @@ def parse_args(argv: list[str]):
     parser.add_argument("--to", dest="target", choices=TOOL_NAMES, help="the tool to ask (default: the other one)")
     parser.add_argument("--session", help="a transcript path or session id instead of the current session")
     parser.add_argument("--last", action="store_true", help="use the newest session for this folder")
-    parser.add_argument("--current-turn", action="store_true",
-                        help="treat the latest message as the one to answer, not as the peer request")
-    parser.add_argument("--trim", action=argparse.BooleanOptionalAction, default=None,
-                        help="cut long content with sensible limits: messages %(message)s, tool input %(tool_input)s, "
-                             "tool output %(tool_output)s, summaries %(summary)s, whole transcript %(budget)s "
-                             "characters (default: off, everything is sent)" % TRIM_DEFAULTS)
+    parser.add_argument(
+        "--current-turn",
+        action="store_true",
+        help="treat the latest message as the one to answer, not as the peer request",
+    )
+    parser.add_argument(
+        "--trim",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="cut long content with sensible limits: messages {message}, tool input {tool_input}, "
+        "tool output {tool_output}, summaries {summary}, whole transcript {budget} "
+        "characters (default: off, everything is sent)".format(**TRIM_DEFAULTS),
+    )
     parser.add_argument("--max-message", type=int, help="characters kept per message (0: no limit)")
     parser.add_argument("--max-tool-input", type=int, help="characters kept per tool call (0: no limit)")
     parser.add_argument("--max-tool-output", type=int, help="characters kept per tool result (0: no limit)")
-    parser.add_argument("--budget", type=int,
-                        help="most transcript characters; older middle turns are dropped past it (0: no limit)")
+    parser.add_argument(
+        "--budget", type=int, help="most transcript characters; older middle turns are dropped past it (0: no limit)"
+    )
     parser.add_argument("--no-tools", action="store_true", help="leave tool calls and results out")
-    parser.add_argument("--model", help="model for the peer (default: PEER_<TOOL>_MODEL, the config file, "
-                                        "then the peer's own config)")
-    parser.add_argument("--effort", help="reasoning effort for the peer (default: PEER_<TOOL>_EFFORT, the "
-                                         "config file, then the peer's own config)")
-    parser.add_argument("--assess", action=argparse.BooleanOptionalAction, default=None,
-                        help="whether the asking tool adds its own assessment after the answer (default: off; "
-                             "PEER_ASSESS or \"assess\" in the config file change it)")
-    parser.add_argument("--details", action=argparse.BooleanOptionalAction, default=None,
-                        help="print the full header: commands, mode, the input answered, context size "
-                             "(default: off; PEER_DETAILS or \"details\" in the config file change it)")
+    parser.add_argument(
+        "--model", help="model for the peer (default: PEER_<TOOL>_MODEL, the config file, then the peer's own config)"
+    )
+    parser.add_argument(
+        "--effort",
+        help="reasoning effort for the peer (default: PEER_<TOOL>_EFFORT, the config file, then the peer's own config)",
+    )
+    parser.add_argument(
+        "--assess",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="whether the asking tool adds its own assessment after the answer (default: off; "
+        'PEER_ASSESS or "assess" in the config file change it)',
+    )
+    parser.add_argument(
+        "--details",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="print the full header: commands, mode, the input answered, context size "
+        '(default: off; PEER_DETAILS or "details" in the config file change it)',
+    )
     parser.add_argument("--ephemeral", action="store_true", help="do not keep the peer session")
     parser.add_argument("--timeout", type=int, default=1800, help="seconds to wait (default: 1800)")
     parser.add_argument("--dry-run", action="store_true", help="print the header and prompt instead of sending it")
@@ -1270,8 +1373,13 @@ def main(argv: list[str] | None = None) -> int:
     if mode == "ask" and text:
         mode = "question"
     try:
-        outside = not (args.session or args.last or args.source or
-                       os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("CODEX_THREAD_ID"))
+        outside = not (
+            args.session
+            or args.last
+            or args.source
+            or os.environ.get("CLAUDE_CODE_SESSION_ID")
+            or os.environ.get("CODEX_THREAD_ID")
+        )
         if outside and mode == "question":
             # A plain question from an ordinary terminal: no history to send.
             if not args.target:
@@ -1290,8 +1398,13 @@ def main(argv: list[str] | None = None) -> int:
         cwd = session.cwd if session.cwd and os.path.isdir(session.cwd) else os.getcwd()
         assess = resolve_assess(args.assess, config)
         details = resolve_switch("details", args.details, config).value == "on"
-        run = Run(peer, cwd, resolve_setting(peer, "model", args.model, config),
-                  resolve_setting(peer, "effort", args.effort, config), args)
+        run = Run(
+            peer,
+            cwd,
+            resolve_setting(peer, "model", args.model, config),
+            resolve_setting(peer, "effort", args.effort, config),
+            args,
+        )
     except PeerError as exc:
         print(f"peer: {exc}", file=sys.stderr)
         return 1
@@ -1306,19 +1419,28 @@ def main(argv: list[str] | None = None) -> int:
         prompt = save_images(request.prompt, session.images, Path(image_dir.name)) if image_dir else request.prompt
         answer = run(prompt)
     except PeerError as exc:
-        print(header(argv, run, request, session, mode, None, assess) if details
-              else short_header(run, request, None, assess), flush=True)
+        print(
+            header(argv, run, request, session, mode, None, assess)
+            if details
+            else short_header(run, request, None, assess),
+            flush=True,
+        )
         if not limits.budget and len(request.prompt) > TRIM_DEFAULTS["budget"]:
-            exc = PeerError(f"{exc}\nThe full conversation was {len(request.prompt):,} characters. If it is too "
-                            f"long for the model, retry with --trim or --budget <chars>.")
+            exc = PeerError(
+                f"{exc}\nThe full conversation was {len(request.prompt):,} characters. If it is too "
+                f"long for the model, retry with --trim or --budget <chars>."
+            )
         print(f"peer: {exc}", file=sys.stderr)
         return 1
     finally:
         if image_dir:
             image_dir.cleanup()
 
-    print(header(argv, run, request, session, mode, answer, assess) if details
-          else short_header(run, request, answer, assess))
+    print(
+        header(argv, run, request, session, mode, answer, assess)
+        if details
+        else short_header(run, request, answer, assess)
+    )
     print()
     print(answer.text)
     if answer.resume:

@@ -1,0 +1,21 @@
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I", "UP", "SIM", "RUF"]
+ignore = [
+    "SIM108",  # ternaries are not always clearer
+    "RUF001", "RUF002", "RUF003",  # transcripts contain typographic characters on purpose
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402"]
+
+[tool.coverage.run]
+source = ["peer"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
