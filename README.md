@@ -4,6 +4,8 @@ Get a second answer from the other coding agent, for the same conversation.
 
 In Claude Code, type `/peer` and Codex answers. In Codex, type `$peer` and Claude Code answers. It works in the terminal and in the desktop apps: the Claude Code CLI and the Code tab of the Claude desktop app, and the Codex CLI and Codex in the ChatGPT desktop app. The other tool sees your conversation so far and can read the same files. Its answer comes back into the tool you asked from.
 
+![peer demo: /peer in Claude Code and $peer in Codex](docs/peer-demo.gif)
+
 ## Install
 
 You need macOS, Python 3.9 or newer, and both Claude Code and Codex installed and signed in. The Codex inside the ChatGPT desktop app works too.
