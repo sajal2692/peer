@@ -55,7 +55,7 @@ Add options after `/peer` or `$peer` for one call:
 | Option | Effect |
 |---|---|
 | `--model <id>`, `--effort <level>` | Pick the other tool's model and reasoning effort. |
-| `--assess` | After the answer, your tool compares the two answers and gives a verdict. |
+| `--assess` | After the answer, your own tool compares the two answers and gives a verdict. (`review` is the reverse: the other tool judges your tool's reply.) |
 | `--details` | Show the full run: the exact commands, which message was answered, and how much was sent. |
 | `--trim` | Shorten long messages and tool output. By default the whole conversation is sent. |
 
