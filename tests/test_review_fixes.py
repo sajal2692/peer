@@ -3,8 +3,16 @@
 import os
 import unittest
 
-from helpers import Sandbox, claude_assistant, claude_user, codex_event, human, peer, write_jsonl
+from helpers import Sandbox, claude_assistant, claude_user, codex_event, human, write_jsonl
 from test_cli import CliTestCase
+
+from peer import common
+from peer.claude_transcript import parse_claude
+from peer.codex_transcript import parse_codex
+from peer.request import Limits, build_request
+from peer.runner import child_env
+from peer.settings import config_budget
+from peer.transcript import is_peer_command
 
 
 def bash_call(call_id, command):
@@ -39,10 +47,10 @@ FIRST_PEER_THEN_REVIEW = [
 
 class OwnPeerRunTests(unittest.TestCase):
     def test_a_follow_up_review_looks_past_the_first_peer_run(self):
-        session = peer.parse_claude(write_jsonl(FIRST_PEER_THEN_REVIEW))
+        session = parse_claude(write_jsonl(FIRST_PEER_THEN_REVIEW))
         flagged = [i for i in session.items if i.peer_run]
         self.assertEqual(len(flagged), 1)
-        req = peer.build_request(session, "codex", "review", "", True, peer.Limits())
+        req = build_request(session, "codex", "review", "", True, Limits())
         self.assertEqual(req.target, "How should I cache this?")
         self.assertIn("Use an LRU cache.", req.prompt)
         self.assertNotIn("(relayed)", req.prompt)
@@ -50,8 +58,8 @@ class OwnPeerRunTests(unittest.TestCase):
 
     def test_a_bare_peer_after_a_peer_run_answers_the_real_message(self):
         rows = [*FIRST_PEER_THEN_REVIEW[:-2], human("<command-name>/peer</command-name>")]
-        session = peer.parse_claude(write_jsonl(rows))
-        req = peer.build_request(session, "codex", "ask", "", True, peer.Limits())
+        session = parse_claude(write_jsonl(rows))
+        req = build_request(session, "codex", "ask", "", True, Limits())
         self.assertEqual(req.target, "How should I cache this?")
 
     def test_a_genuine_notification_is_still_answered(self):
@@ -63,14 +71,14 @@ class OwnPeerRunTests(unittest.TestCase):
             claude_assistant({"type": "text", "text": "The build failed on a type error."}),
             human("<command-name>/peer</command-name>"),
         ]
-        session = peer.parse_claude(write_jsonl(rows))
-        req = peer.build_request(session, "codex", "ask", "", True, peer.Limits())
+        session = parse_claude(write_jsonl(rows))
+        req = build_request(session, "codex", "ask", "", True, Limits())
         self.assertEqual(req.target_label, "Task notification")
         self.assertIn("build failed", req.target)
 
     def test_current_turn_keeps_everything(self):
-        session = peer.parse_claude(write_jsonl(FIRST_PEER_THEN_REVIEW[:2]))
-        req = peer.build_request(session, "codex", "review", "", False, peer.Limits())
+        session = parse_claude(write_jsonl(FIRST_PEER_THEN_REVIEW[:2]))
+        req = build_request(session, "codex", "review", "", False, Limits())
         self.assertEqual(req.target, "How should I cache this?")
 
     def test_codex_peer_then_peer_review(self):
@@ -82,8 +90,8 @@ class OwnPeerRunTests(unittest.TestCase):
             codex_event({"type": "AgentMessage", "content": [{"type": "Text", "text": "Claude says (relayed)"}]}),
             codex_event({"type": "UserMessage", "content": [{"type": "text", "text": "$peer review"}]}),
         ]
-        session = peer.parse_codex(write_jsonl(rows))
-        req = peer.build_request(session, "claude", "review", "", True, peer.Limits())
+        session = parse_codex(write_jsonl(rows))
+        req = build_request(session, "claude", "review", "", True, Limits())
         self.assertEqual(req.target, "Is this regex safe?")
         self.assertNotIn("(relayed)", req.prompt)
 
@@ -96,8 +104,8 @@ class OwnPeerRunTests(unittest.TestCase):
             claude_assistant({"type": "text", "text": "## Codex's answer ... (relayed)"}),
             human("<command-name>/peer</command-name><command-args>review</command-args>"),
         ]
-        session = peer.parse_claude(write_jsonl(rows))
-        req = peer.build_request(session, "codex", "review", "", True, peer.Limits())
+        session = parse_claude(write_jsonl(rows))
+        req = build_request(session, "codex", "review", "", True, Limits())
         self.assertEqual(req.target, "How should I cache this?")
         self.assertNotIn("(relayed)", req.prompt)
 
@@ -108,8 +116,8 @@ class OwnPeerRunTests(unittest.TestCase):
             claude_assistant({"type": "text", "text": "Use an LRU cache; Codex agrees."}),
             human("<command-name>/peer</command-name><command-args>review</command-args>"),
         ]
-        session = peer.parse_claude(write_jsonl(rows))
-        req = peer.build_request(session, "codex", "review", "", True, peer.Limits())
+        session = parse_claude(write_jsonl(rows))
+        req = build_request(session, "codex", "review", "", True, Limits())
         self.assertEqual(req.target, "How should I cache this?")
         self.assertIn("Codex agrees", req.prompt)
 
@@ -130,31 +138,31 @@ class OwnPeerRunTests(unittest.TestCase):
             codex_event({"type": "AgentMessage", "content": [{"type": "Text", "text": "Claude says (relayed)"}]}),
             codex_event({"type": "UserMessage", "content": [{"type": "text", "text": "$peer review"}]}),
         ]
-        session = peer.parse_codex(write_jsonl(rows))
-        req = peer.build_request(session, "claude", "review", "", True, peer.Limits())
+        session = parse_codex(write_jsonl(rows))
+        req = build_request(session, "claude", "review", "", True, Limits())
         self.assertEqual(req.target, "Is this regex safe?")
 
     def test_only_peer_commands_with_from_count(self):
-        self.assertTrue(peer.is_peer_command({"command": "~/.local/bin/peer --from claude review 'x'"}))
-        self.assertTrue(peer.is_peer_command({"command": "cd /p && ./peer.py --from codex"}))
-        self.assertFalse(peer.is_peer_command({"command": "cd peer && ls"}))
+        self.assertTrue(is_peer_command({"command": "~/.local/bin/peer --from claude review 'x'"}))
+        self.assertTrue(is_peer_command({"command": "cd /p && ./peer.py --from codex"}))
+        self.assertFalse(is_peer_command({"command": "cd peer && ls"}))
 
 
 class ParsingFixTests(unittest.TestCase):
     def test_a_reminder_before_a_notification_does_not_hide_it(self):
         rows = [claude_user("<system-reminder>note</system-reminder>\n<task-notification>done</task-notification>")]
-        items = peer.parse_claude(write_jsonl(rows)).items
+        items = parse_claude(write_jsonl(rows)).items
         self.assertEqual([(i.role, i.label) for i in items], [("input", "Task notification")])
 
     def test_review_works_on_a_reply_made_only_of_tool_calls(self):
         rows = [human("open the PR"), bash_call("g1", "gh pr create"), human("<command-name>/peer</command-name>")]
-        session = peer.parse_claude(write_jsonl(rows))
-        req = peer.build_request(session, "codex", "review", "", True, peer.Limits())
+        session = parse_claude(write_jsonl(rows))
+        req = build_request(session, "codex", "review", "", True, Limits())
         self.assertEqual(req.target, "open the PR")
 
     def test_a_boolean_budget_is_ignored(self):
-        self.assertEqual(peer.config_budget({"budget": True}), 0)
-        self.assertEqual(peer.config_budget({"budget": 5000}), 5000)
+        self.assertEqual(config_budget({"budget": True}), 0)
+        self.assertEqual(config_budget({"budget": 5000}), 5000)
 
 
 class EnvironmentTests(Sandbox):
@@ -167,7 +175,7 @@ class EnvironmentTests(Sandbox):
                 "CLAUDE_CODE_ENTRYPOINT": "cli",
             }
         )
-        env = peer.child_env()
+        env = child_env()
         self.assertEqual((env.get("CLAUDE_CODE_OAUTH_TOKEN"), env.get("CLAUDE_CODE_MAX_OUTPUT_TOKENS")), ("t", "9"))
         self.assertNotIn("CLAUDE_CODE_SESSION_ID", env)
         self.assertNotIn("CLAUDE_CODE_ENTRYPOINT", env)
@@ -206,8 +214,8 @@ class LockdownTests(CliTestCase):
         self.assertIn("Could not read Codex's feature list", err)
 
     def test_mcp_servers_in_dotted_keys_are_switched_off(self):
-        peer.CODEX_HOME.mkdir(parents=True, exist_ok=True)
-        (peer.CODEX_HOME / "config.toml").write_text(
+        common.CODEX_HOME.mkdir(parents=True, exist_ok=True)
+        (common.CODEX_HOME / "config.toml").write_text(
             'mcp_servers.mail.command = "m"\nmcp_servers.mail.args = []\n[profiles.work]\nmodel = "x"\n'
         )
         self.run_main("--from", "claude")

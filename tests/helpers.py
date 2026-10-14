@@ -7,10 +7,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import peer
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from peer import common
+from peer.cli import main
+from peer.request import Limits
 
-TRIMMED = peer.Limits.trimmed(budget=100_000)
+TRIMMED = Limits.trimmed(budget=100_000)
 
 
 def write_jsonl(rows):
@@ -171,20 +173,20 @@ class Sandbox(unittest.TestCase):
 
     def setUp(self):
         self._env = dict(os.environ)
-        self._homes = (peer.CLAUDE_HOME, peer.CODEX_HOME)
+        self._homes = (common.CLAUDE_HOME, common.CODEX_HOME)
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp = Path(self._tmp.name)
         for key in list(os.environ):
             if key.startswith(("PEER_", "CLAUDE_CODE_", "CODEX_")) or key == "CLAUDECODE":
                 del os.environ[key]
         os.environ["PEER_CONFIG"] = str(self.tmp / "config" / "peer.json")
-        peer.CLAUDE_HOME = self.tmp / "claude"
-        peer.CODEX_HOME = self.tmp / "codex"
+        common.CLAUDE_HOME = self.tmp / "claude"
+        common.CODEX_HOME = self.tmp / "codex"
 
     def tearDown(self):
         os.environ.clear()
         os.environ.update(self._env)
-        peer.CLAUDE_HOME, peer.CODEX_HOME = self._homes
+        common.CLAUDE_HOME, common.CODEX_HOME = self._homes
         self._tmp.cleanup()
 
     def run_main(self, *argv):
@@ -194,5 +196,5 @@ class Sandbox(unittest.TestCase):
 
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code = peer.main(list(argv))
+            code = main(list(argv))
         return code, out.getvalue(), err.getvalue()

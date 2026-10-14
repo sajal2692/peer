@@ -6,7 +6,12 @@ import sys
 import unittest
 from pathlib import Path
 
-from helpers import PNG_1PX, Sandbox, claude_assistant, claude_user, codex_event, human, peer, write_jsonl
+from helpers import PNG_1PX, Sandbox, claude_assistant, claude_user, codex_event, human, write_jsonl
+
+from peer import __version__, common
+from peer.cli import main, parse_args
+from peer.common import MARKER
+from peer.sessions import claude_project_dir, find_latest, resolve_session
 
 # A stand-in for `codex exec`. It records its arguments, prompt and environment, writes an
 # answer to the -o file, and prints the header lines real Codex prints on stderr.
@@ -70,14 +75,14 @@ class CliTestCase(Sandbox):
         return json.loads(self.record.read_text())
 
     def claude_session(self, rows, session_id="claude-1"):
-        folder = peer.CLAUDE_HOME / "projects" / "-proj"
+        folder = common.CLAUDE_HOME / "projects" / "-proj"
         folder.mkdir(parents=True)
         path = folder / f"{session_id}.jsonl"
         path.write_text("".join(json.dumps(r) + "\n" for r in rows))
         return path
 
     def codex_session(self, rows, thread_id="0199-thread"):
-        folder = peer.CODEX_HOME / "sessions" / "2026" / "10" / "14"
+        folder = common.CODEX_HOME / "sessions" / "2026" / "10" / "14"
         folder.mkdir(parents=True)
         path = folder / f"rollout-2026-10-14T10-00-00-{thread_id}.jsonl"
         path.write_text("".join(json.dumps(r) + "\n" for r in rows))
@@ -118,8 +123,8 @@ class ClaudeToCodexTests(CliTestCase):
         self.assertEqual(rec["args"][:3], ["exec", "--sandbox", "read-only"])
 
     def test_codex_tools_that_act_outside_the_sandbox_are_disabled(self):
-        (peer.CODEX_HOME).mkdir(parents=True)
-        (peer.CODEX_HOME / "config.toml").write_text(
+        (common.CODEX_HOME).mkdir(parents=True)
+        (common.CODEX_HOME / "config.toml").write_text(
             'model = "x"\n[mcp_servers.mail]\ncommand = "m"\n[mcp_servers.mail.env]\nA = "1"\n'
             '[mcp_servers."my.server"]\nurl = "u"\n'
         )
@@ -264,21 +269,21 @@ class SessionDiscoveryTests(CliTestCase):
         self.assertTrue(self.recorded()["prompt"].endswith("hello"))
 
     def test_last_skips_sessions_peer_started(self):
-        folder = peer.claude_project_dir(os.getcwd())
+        folder = claude_project_dir(os.getcwd())
         folder.mkdir(parents=True)
         real = folder / "real.jsonl"
         real.write_text(json.dumps(claude_user("my real question")) + "\n")
         mine = folder / "mine.jsonl"
-        mine.write_text(json.dumps(claude_user(peer.MARKER + "\nYou are Claude Code")) + "\n")
+        mine.write_text(json.dumps(claude_user(MARKER + "\nYou are Claude Code")) + "\n")
         os.utime(real, (1, 1))  # the peer-started one is newer
-        self.assertEqual(peer.find_latest("claude", os.getcwd()), real)
+        self.assertEqual(find_latest("claude", os.getcwd()), real)
 
     def test_session_by_path_and_id(self):
         path = write_jsonl(CODEX_CHAT)
         code, _, _ = self.run_main("--from", "codex", "--session", str(path), "--dry-run")
         self.assertEqual(code, 0)
         self.codex_session(CODEX_CHAT, "0199-by-id")
-        session, drop = peer.resolve_session(peer.parse_args(["--session", "0199-by-id"]))
+        session, drop = resolve_session(parse_args(["--session", "0199-by-id"]))
         self.assertEqual((session.tool, drop), ("codex", False))
         code, _, err = self.run_main("--session", "no-such-id")
         self.assertEqual(code, 1)
@@ -292,8 +297,8 @@ class VersionTests(unittest.TestCase):
 
         out = io.StringIO()
         with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
-            peer.main(["--version"])
-        self.assertEqual(out.getvalue().strip(), f"peer {peer.__version__}")
+            main(["--version"])
+        self.assertEqual(out.getvalue().strip(), f"peer {__version__}")
 
 
 if __name__ == "__main__":

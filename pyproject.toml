@@ -13,7 +13,7 @@ ignore = [
 "tests/*" = ["E402"]
 
 [tool.coverage.run]
-source = ["peer"]
+source = ["src/peer"]
 branch = true
 
 [tool.coverage.report]
