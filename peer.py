@@ -51,7 +51,10 @@ CODEX_BUNDLED = [
 CLAUDE_FALLBACKS = [str(Path.home() / ".local/bin/claude"), str(Path.home() / ".claude/local/claude")]
 
 # The only tools the Claude peer has. None of them can change files or run commands.
-CLAUDE_READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "WebSearch", "WebFetch"]
+CLAUDE_READ_ONLY_TOOLS = ["Read", "Grep", "Glob"]
+# On by default; --no-web removes them. With web access, a prompt injection in the transcript
+# or a file could have the peer put what it read into a URL, so --no-web is there for that.
+CLAUDE_WEB_TOOLS = ["WebSearch", "WebFetch"]
 
 # Session-specific variables that must not leak into the peer process.
 SCRUB_EXACT = {
@@ -64,7 +67,18 @@ SCRUB_EXACT = {
     "AI_AGENT",
 }
 SCRUB_PREFIXES = ("CLAUDE_CODE_", "CLAUDE_AGENT_SDK", "CODEX_COMPANION_")
-SCRUB_KEEP_PREFIXES = ("CLAUDE_CODE_USE_",)
+# The user's own Claude Code settings, which the CLI needs: sign-in tokens, provider choice,
+# output limits. Everything else under CLAUDE_CODE_ is per-session and is dropped.
+SCRUB_KEEP_PREFIXES = (
+    "CLAUDE_CODE_USE_",
+    "CLAUDE_CODE_SKIP_",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_CODE_API_KEY_HELPER_TTL_MS",
+    "CLAUDE_CODE_CLIENT_CERT",
+    "CLAUDE_CODE_CLIENT_KEY",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+    "CLAUDE_CODE_GIT_BASH_PATH",
+)
 
 # Codex injects these as user-role messages; they are not things the user typed.
 CODEX_WRAPPER_PREFIXES = (
@@ -98,6 +112,8 @@ class Item:
     detail: str = ""
     # Supplied by the user (an attached file, a hook's context), so it is never withheld.
     user_supplied: bool = False
+    # The completion notification of a peer run started from this session.
+    peer_run: bool = False
 
     @property
     def starts_turn(self) -> bool:
@@ -321,6 +337,16 @@ def claude_attachment(attachment: dict, duplicate: bool, images: list, instructi
     return []
 
 
+# A shell command that runs peer for this session; the skills always pass --from.
+PEER_COMMAND_RE = re.compile(r"(?:^|[\s/;&|(])peer(?:\.py)?\s[^\n]*--from\b")
+TOOL_USE_ID_RE = re.compile(r"<tool-use-id>\s*([\w-]+)\s*</tool-use-id>")
+
+
+def is_peer_command(value) -> bool:
+    command = value.get("command") if isinstance(value, dict) else None
+    return isinstance(command, str) and bool(PEER_COMMAND_RE.search(command))
+
+
 def queued_copy_follows(rows: list[dict], index: int, attachment: dict, window: int = 40) -> bool:
     """True when a queued message is also written as a user row shortly after it, as older
     Claude Code versions did. Matching nearby rows, rather than any earlier text, keeps a
@@ -341,6 +367,7 @@ def parse_claude(path: Path) -> Session:
     cwd = None
     local_command_next = False
     ask_ids: set = set()
+    peer_call_ids: set = set()  # Bash calls that ran peer
     rows = [r for r in read_jsonl(path) if not r.get("isSidechain")]  # sidechains are subagent traffic
     for index, row in enumerate(rows):
         cwd = row.get("cwd") or cwd
@@ -365,8 +392,8 @@ def parse_claude(path: Path) -> Session:
                 if "<local-command-caveat>" in text:
                     local_command_next = True
                 elif row.get("promptSource") == "system":
-                    label = injected_label(row, text)
                     text = REMINDER_RE.sub("", text).strip()
+                    label = injected_label(row, text)
                     if label and text:
                         items.append(Item("input", text, label))
                 continue
@@ -382,10 +409,10 @@ def parse_claude(path: Path) -> Session:
                     else:
                         items.append(Item("result", text))
                 continue
-            text = blocks_text(content, images)
+            # Reminders can come first; the label is read from what follows them.
+            text = REMINDER_RE.sub("", blocks_text(content, images)).strip()
             label = injected_label(row, text)
             if label:
-                text = REMINDER_RE.sub("", text).strip()
                 if text:
                     items.append(Item("input", text, label))
                 local_command_next = False
@@ -414,7 +441,13 @@ def parse_claude(path: Path) -> Session:
                         ask_ids.add(block.get("id"))
                         items.append(tool_item("AskUserQuestion", block.get("input"), ask_brief(block.get("input"))))
                     else:
+                        if block.get("name") == "Bash" and is_peer_command(block.get("input")):
+                            peer_call_ids.add(block.get("id"))
                         items.append(tool_item(str(block.get("name")), block.get("input")))
+    for item in items:
+        match = TOOL_USE_ID_RE.search(item.text) if item.role == "input" else None
+        if match and match.group(1) in peer_call_ids:
+            item.peer_run = True
     return Session("claude", path, cwd, merge_assistant(items), images, instruction_files)
 
 
@@ -791,12 +824,29 @@ def drop_from_last_typed(turns: list[list[Item]]) -> list[list[Item]]:
     return turns[: typed[-1]] if typed else turns
 
 
+def is_peer_turn(turn: list[Item]) -> bool:
+    """A turn that is about an earlier peer call rather than the user's work: one the user
+    started with /peer or $peer, or the notification that a peer run had finished."""
+    first = turn[0]
+    return (first.role == "user" and bool(PEER_INVOCATION_RE.match(first.text))) or first.peer_run
+
+
+def drop_earlier_peer_turns(turns: list[list[Item]]) -> list[list[Item]]:
+    """Drops peer turns at the end, so /peer then /peer review both look at the reply the
+    user asked about, not at the host relaying an earlier peer answer."""
+    while turns and is_peer_turn(turns[-1]):
+        turns = turns[:-1]
+    return turns
+
+
 def build_request(session: Session, peer: str, mode: str, text: str, drop_current: bool, limits: Limits) -> Request:
     host_name, peer_name = TOOL_NAMES[session.tool], TOOL_NAMES[peer]
     cwd = session.cwd or os.getcwd()
     turns = split_turns(session.items)
     if drop_current:
         turns = drop_from_last_typed(turns)
+        if mode in ("ask", "review"):
+            turns = drop_earlier_peer_turns(turns)
 
     intro = (
         f"{MARKER}\n"
@@ -839,7 +889,7 @@ def build_request(session: Session, peer: str, mode: str, text: str, drop_curren
         if not turns:
             raise PeerError("No earlier reply to review.")
         last = turns[-1]
-        if not any(i.role == "assistant" for i in last):
+        if not any(i.role in ("assistant", "tool") for i in last):
             raise PeerError(f"The last turn has no {host_name} reply to review.")
         transcript, omitted = render_transcript(turns, host_name, limits)
         focus = f"\n\nThe user wants you to focus on: {text}" if text else ""
@@ -947,7 +997,7 @@ def resolve_setting(tool: str, key: str, flag: str | None, config: dict) -> Sett
 
 
 def resolve_switch(key: str, flag: bool | None, config: dict) -> Setting:
-    """An on/off option, off unless the flag, PEER_<KEY> or the config file turns it on."""
+    """An on/off option: the flag, then PEER_<KEY>, then the config file, then the default."""
     if flag is not None:
         return Setting("on" if flag else "off", f"--{key}" if flag else f"--no-{key}")
     env_name = f"PEER_{key.upper()}"
@@ -956,7 +1006,11 @@ def resolve_switch(key: str, flag: bool | None, config: dict) -> Setting:
         return Setting("on" if env in ("1", "true", "yes", "on") else "off", env_name)
     if isinstance(config.get(key), bool):
         return Setting("on" if config[key] else "off", "peer config")
-    return Setting("off", "default")
+    return Setting("on" if SWITCH_DEFAULTS.get(key) else "off", "default")
+
+
+# Switches that are on unless turned off. The rest are off unless turned on.
+SWITCH_DEFAULTS = {"web": True}
 
 
 def resolve_assess(flag: bool | None, config: dict) -> Setting:
@@ -989,6 +1043,7 @@ CONFIG_USAGE = """Change a setting:
   peer config assess on|off           your tool's assessment after the answer
   peer config details on|off          full run header instead of the stats line
   peer config trim on|off             cut long messages and tool output with sensible limits
+  peer config web on|off              let the peer search and fetch web pages
   peer config budget <chars>          most transcript characters to send ("default" for no limit)"""
 
 
@@ -1008,13 +1063,13 @@ def show_config() -> str:
                     f"{key} {own} ({TOOL_NAMES[tool]}'s own config)" if own else f"{key}: {TOOL_NAMES[tool]}'s default"
                 )
         lines.append(f"When {TOOL_NAMES[tool]} answers: " + ", ".join(parts))
-    for key, label in (("assess", "Assessment"), ("details", "Full header")):
+    for key, label in (("assess", "Assessment"), ("details", "Full header"), ("web", "Web access")):
         setting = resolve_switch(key, None, config)
         source = "default" if setting.source == "default" else f"from {setting.source}"
         lines.append(f"{label}: {setting.value} ({source})")
     trim = resolve_switch("trim", None, config)
     lines.append(f"Trim: {trim.value} ({'default' if trim.source == 'default' else 'from ' + trim.source})")
-    budget = config.get("budget") if isinstance(config.get("budget"), int) else None
+    budget = config_budget(config)
     if budget:
         lines.append(f"Context budget: {budget:,} characters (from peer config)")
     return "\n".join([*lines, "", CONFIG_USAGE])
@@ -1038,7 +1093,7 @@ def config_command(words: list[str]) -> int:
                 config[tool] = section
             else:
                 config.pop(tool, None)
-        elif len(words) == 2 and words[0] in ("assess", "details", "trim") and words[1].lower() in ("on", "off"):
+        elif len(words) == 2 and words[0] in ("assess", "details", "trim", "web") and words[1].lower() in ("on", "off"):
             config[words[0]] = words[1].lower() == "on"
         elif len(words) == 2 and words[0] == "budget" and (words[1].isdigit() or words[1] == "default"):
             if words[1] == "default":
@@ -1165,18 +1220,20 @@ CODEX_RISKY_FEATURES = (
     "image_generation",
     "hooks",
 )
-MCP_SERVER_RE = re.compile(r'^\[mcp_servers\.(?:"([^"]+)"|([A-Za-z0-9_-]+))\]\s*$', re.M)
+# MCP servers in config.toml, as tables ([mcp_servers.name]) or dotted keys (mcp_servers.name.command = ...).
+MCP_SERVER_RE = re.compile(r'^\s*\[?\s*mcp_servers\.(?:"([^"]+)"|([A-Za-z0-9_-]+))[.\]\s=]', re.M)
 
 
-def codex_lockdown(binary: str) -> list[str]:
+def codex_lockdown(binary: str, web: bool = False) -> list[str]:
     """Flags that switch off every Codex tool able to act outside the read-only sandbox.
 
     Feature names vary between Codex versions and an unknown name is an error, so only the
-    features this Codex reports as enabled are turned off.
+    features this Codex reports as enabled are turned off. If the list can't be read, peer
+    stops rather than run Codex with those tools on.
     """
     flags: list[str] = []
     try:
-        out = subprocess.run(
+        proc = subprocess.run(
             [binary, "features", "list"],
             capture_output=True,
             text=True,
@@ -1185,10 +1242,19 @@ def codex_lockdown(binary: str) -> list[str]:
             stdin=subprocess.DEVNULL,
             timeout=30,
             env=child_env(),
-        ).stdout
+        )
+        out = proc.stdout if proc.returncode == 0 else ""
+    except FileNotFoundError as exc:
+        raise PeerError(f"Could not start Codex: {exc}") from None
     except (OSError, subprocess.SubprocessError):
         out = ""
-    enabled = {line.split()[0] for line in out.splitlines() if line.split() and line.split()[-1] == "true"}
+    rows = [line.split() for line in out.splitlines() if len(line.split()) >= 2]
+    if not any(row[-1] in ("true", "false") for row in rows):
+        raise PeerError(
+            "Could not read Codex's feature list (codex features list), so peer cannot switch off the Codex "
+            "tools that act outside its read-only sandbox. Update Codex, or set PEER_CODEX_BIN to a newer one."
+        )
+    enabled = {row[0] for row in rows if row[-1] == "true"}
     for feature in CODEX_RISKY_FEATURES:
         if feature in enabled:
             flags += ["--disable", feature]
@@ -1196,10 +1262,16 @@ def codex_lockdown(binary: str) -> list[str]:
         config = (CODEX_HOME / "config.toml").read_text(encoding="utf-8", errors="replace")
     except OSError:
         config = ""
+    seen = set()
     for quoted, bare in MCP_SERVER_RE.findall(config):
         name = quoted or bare
+        if name in seen:
+            continue
+        seen.add(name)
         key = f'"{name}"' if quoted else name
         flags += ["-c", f"mcp_servers.{key}.enabled=false"]
+    if not web:
+        flags += ["-c", 'web_search="disabled"']
     return flags
 
 
@@ -1236,13 +1308,13 @@ def codex_command(
     return cmd
 
 
-def claude_command(binary: str, model: str | None, effort: str | None, ephemeral: bool) -> list[str]:
+def claude_command(binary: str, model: str | None, effort: str | None, ephemeral: bool, web: bool = False) -> list[str]:
     """Claude Code in print mode with only reading tools available.
 
     --tools limits which tools exist at all, so permission rules in the user's settings cannot
     re-enable Bash or editing. MCP servers, hooks and skills are switched off for the same reason.
     """
-    tools = ",".join(CLAUDE_READ_ONLY_TOOLS)
+    tools = ",".join(CLAUDE_READ_ONLY_TOOLS + (CLAUDE_WEB_TOOLS if web else []))
     cmd = [
         binary,
         "-p",
@@ -1352,16 +1424,18 @@ def run_process(cmd: list[str], prompt: str, timeout: int, cwd: str | None, name
 class Run:
     """One peer call: the command it will run, and running it."""
 
-    def __init__(self, peer: str, cwd: str, model: Setting, effort: Setting, args):
-        self.peer, self.cwd, self.model, self.effort, self.args = peer, cwd, model, effort, args
+    def __init__(self, peer: str, cwd: str, model: Setting, effort: Setting, args, web: bool = False):
+        self.peer, self.cwd, self.model, self.effort, self.args, self.web = peer, cwd, model, effort, args, web
         binary = find_binary(peer)
-        self.tmp = tempfile.TemporaryDirectory(prefix="peer-") if peer == "codex" else None
-        self.out_file = Path(self.tmp.name) / "answer.md" if self.tmp else None
         if peer == "codex":
-            lockdown = codex_lockdown(binary)
+            # A dry run only shows the command, so it skips probing Codex's features.
+            lockdown = ["<lockdown flags>"] if args.dry_run else codex_lockdown(binary, web)
+            self.tmp = tempfile.TemporaryDirectory(prefix="peer-")
+            self.out_file = Path(self.tmp.name) / "answer.md"
             self.cmd = codex_command(binary, cwd, self.out_file, model.value, effort.value, args.ephemeral, lockdown)
         else:
-            self.cmd = claude_command(binary, model.value, effort.value, args.ephemeral)
+            self.tmp, self.out_file = None, None
+            self.cmd = claude_command(binary, model.value, effort.value, args.ephemeral, web)
 
     def close(self) -> None:
         if self.tmp:
@@ -1390,12 +1464,17 @@ class Run:
 # ---------------------------------------------------------------- command line
 
 
+def config_budget(config: dict) -> int:
+    value = config.get("budget")
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+
 def resolve_limits(args, config: dict) -> Limits:
     """Everything by default; --trim (or the trim setting) starts from sensible limits; each
     --max-* flag, --budget and --no-tools then overrides one part."""
     limits = Limits.trimmed() if resolve_switch("trim", args.trim, config).value == "on" else Limits()
-    if isinstance(config.get("budget"), int) and args.budget is None:
-        limits.budget = config["budget"]
+    if config_budget(config) and args.budget is None:
+        limits.budget = config_budget(config)
     for flag, name in (
         ("max_message", "message"),
         ("max_tool_input", "tool_input"),
@@ -1428,6 +1507,10 @@ def setting_text(name: str, requested: Setting, actual: str | None) -> str:
     return f"{name}: {requested.source}"
 
 
+def target_prefix(request: Request) -> str:
+    return "Reviewing the reply to" if request.mode == "review" else "Answering"
+
+
 def short_header(run: Run, request: Request, answer: Answer | None, assess: Setting) -> str:
     """The default header: the model and effort, plus anything the reader must not miss."""
     peer = TOOL_NAMES[run.peer]
@@ -1441,7 +1524,8 @@ def short_header(run: Run, request: Request, answer: Answer | None, assess: Sett
     lines = [f"## {peer}'s answer", "", " | ".join(stats)]
     if request.target_label not in ("User", "Question"):
         # The peer answered something the user did not type; say so even in short form.
-        lines.append(f'Answering: {request.target_label}: "{" ".join(clip(request.target, 200).split())}"')
+        target = " ".join(clip(request.target, 200).split())
+        lines.append(f'{target_prefix(request)}: {request.target_label}: "{target}"')
     return "\n".join(lines)
 
 
@@ -1469,8 +1553,9 @@ def header(
         f"{peer} command: {run.display(len(request.prompt))}",
         settings,
         f"Mode: {mode_label(mode, host, peer)}",
-        f'Answering: {request.target_label}: "{" ".join(clip(request.target, 300).split())}"',
+        f'{target_prefix(request)}: {request.target_label}: "{" ".join(clip(request.target, 300).split())}"',
         f"Context: {context}",
+        f"Web access: {'on' if run.web else 'off'}",
         f"Assessment: {assess.value} ({assess.source if assess.source == 'default' else 'from ' + assess.source})",
     ]
     return "\n".join(lines)
@@ -1528,6 +1613,13 @@ def parse_args(argv: list[str]):
         help="print the full header: commands, mode, the input answered, context size "
         '(default: off; PEER_DETAILS or "details" in the config file change it)',
     )
+    parser.add_argument(
+        "--web",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help='let the peer search and fetch web pages (default: on; --no-web, PEER_WEB=0 or "web" in the config '
+        "file turn it off)",
+    )
     parser.add_argument("--ephemeral", action="store_true", help="do not keep the peer session")
     parser.add_argument("--timeout", type=int, default=1800, help="seconds to wait (default: 1800)")
     parser.add_argument("--dry-run", action="store_true", help="print the header and prompt instead of sending it")
@@ -1584,12 +1676,14 @@ def main(argv: list[str] | None = None) -> int:
         cwd = session.cwd if session.cwd and os.path.isdir(session.cwd) else os.getcwd()
         assess = resolve_assess(args.assess, config)
         details = resolve_switch("details", args.details, config).value == "on"
+        web = resolve_switch("web", args.web, config).value == "on"
         run = Run(
             peer,
             cwd,
             resolve_setting(peer, "model", args.model, config),
             resolve_setting(peer, "effort", args.effort, config),
             args,
+            web,
         )
     except PeerError as exc:
         print(f"peer: {exc}", file=sys.stderr)

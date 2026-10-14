@@ -5,6 +5,7 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
 export HOME="$work/home"
 mkdir -p "$HOME"
 git config --global user.email test@example.com
@@ -44,6 +45,16 @@ if bash < "$repo/install.sh" 2>/dev/null; then
   exit 1
 fi
 
-# A cut-off download runs nothing.
-head -c 400 "$repo/install.sh" | bash
+# A download cut off inside main() runs nothing and fails.
+fresh="$work/fresh-home"
+mkdir -p "$fresh"
+cut_at=$(( $(grep -n '^main()' "$repo/install.sh" | cut -d: -f1) + 5 ))
+if head -n "$cut_at" "$repo/install.sh" | HOME="$fresh" bash 2>/dev/null; then
+  echo "expected a cut-off installer to fail" >&2
+  exit 1
+fi
+if [ -e "$fresh/.local/bin/peer" ] || [ -e "$fresh/.local/share/peer" ]; then
+  echo "a cut-off installer must not install anything" >&2
+  exit 1
+fi
 echo "one-line installer: ok"

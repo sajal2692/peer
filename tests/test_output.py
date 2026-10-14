@@ -38,7 +38,7 @@ class EnvTests(unittest.TestCase):
 class HeaderTests(unittest.TestCase):
     def test_short_header(self):
         session = peer.parse_claude(write_jsonl(INJECTED_ROWS))
-        args = peer.parse_args([])
+        args = peer.parse_args(["--dry-run"])
         saved = dict(peer.os.environ)
         try:
             peer.os.environ["PEER_CODEX_BIN"] = "/bin/codex-test"
@@ -98,7 +98,8 @@ class HeaderTests(unittest.TestCase):
         self.assertTrue(lines[5].startswith("Mode: Codex answered the latest input itself"))
         self.assertTrue(lines[6].startswith('Answering: Task notification: "<task-notification>peer finished'))
         self.assertTrue(lines[7].startswith("Context: 7 turns from Claude Code"))
-        self.assertEqual(lines[8], "Assessment: off (default)")
+        self.assertEqual(lines[8], "Web access: on")
+        self.assertEqual(lines[9], "Assessment: off (default)")
         self.assertEqual(err.getvalue(), "")
 
 
