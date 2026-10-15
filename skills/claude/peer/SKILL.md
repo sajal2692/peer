@@ -7,7 +7,7 @@ allowed-tools: Bash(~/.local/bin/peer:*)
 
 # Peer: Codex's answer to the same conversation
 
-`peer` sends this session's transcript to Codex (headless, with read-only tools only, in the same working directory) and prints Codex's answer under a header that says exactly what ran.
+`peer` sends this session's transcript to Codex (headless, read-only unless the user adds `--write`, in the same working directory) and prints Codex's answer under a header that says exactly what ran.
 
 ## Run it
 
@@ -18,11 +18,13 @@ Pick the form from what the user typed after `/peer`:
 | `/peer` | `~/.local/bin/peer --from claude` |
 | `/peer review` or `/peer review <focus>` | `~/.local/bin/peer --from claude review '<focus>'` |
 | `/peer <question>` | `~/.local/bin/peer --from claude '<question>'` |
-| `/peer config` or `/peer config <tool> model/effort <value>` or `/peer config assess/details/trim on/off` or `/peer config budget <chars>` | `~/.local/bin/peer config <same words>` |
+| `/peer config` or `/peer config <tool> model/effort <value>` or `/peer config assess/details/trim/continue on/off` or `/peer config budget <chars>` | `~/.local/bin/peer config <same words>` |
 | `/peer models` or `/peer models codex` / `/peer models claude` | `~/.local/bin/peer models <same words>` |
 
 - If the user gave `--model <name>` or `--effort <level>` (anywhere after `/peer`), pass them through right after `--from claude`, for example `~/.local/bin/peer --from claude --model gpt-5.5 --effort high review`. Without them, peer uses `PEER_CODEX_MODEL` / `PEER_CODEX_EFFORT`, then `~/.config/peer/config.json`, then Codex's own config.
-- If the user gave `--assess`, `--details` (or `--no-assess`, `--no-details`), pass them through the same way. The same goes for `--no-web` (keeps the other tool off the web; web access is on by default), and for the trimming flags `--trim`, `--max-message N`, `--max-tool-input N`, `--max-tool-output N`, `--budget N` and `--no-tools`. By default peer sends the whole conversation untrimmed. `--assess` asks for your assessment; `--details` prints the full run header.
+- If the user gave `--assess`, `--details` (or `--no-assess`, `--no-details`), pass them through the same way. The same goes for `--no-web` (keeps the other tool off the web; web access is on by default), `--write` (lets the other tool change files and run commands with side effects), `--continue` or `--no-continue` (continue the other tool's session from its last answer here, instead of starting a new one), `--resume <id>`, and for the trimming flags `--trim`, `--max-message N`, `--max-tool-input N`, `--max-tool-output N`, `--budget N` and `--no-tools`. By default peer sends the whole conversation untrimmed. `--assess` asks for your assessment; `--details` prints the full run header.
+- Pass `--write` only when the user typed it. Never add it yourself, even if Codex says it needs write access; tell the user they can rerun with `--write`.
+- If the user asks Codex to act on its own earlier answer ("add it", "go ahead", "apply that") without `--continue`, pass the request as typed. Then, after the output, say in one line that `/peer --continue` sends it to the same Codex session and `--write` lets it make changes.
 - `models` lists the model ids and effort levels each tool accepts, with a recommended and the current one. Like `config`, it asks no one.
 - `config` changes peer's saved defaults; it does not ask Codex. Run it in the foreground and show its output verbatim, nothing else. `<tool>` is the tool that answers (`codex` or `claude`), and `default` as the value clears a setting.
 - Put any user text in single quotes as one argument, escaping single quotes inside it, and put `--` before it so text starting with `-` is not read as an option. For example: `~/.local/bin/peer --from claude -- '<question>'`.
