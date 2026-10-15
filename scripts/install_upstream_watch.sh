@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Runs scripts/upstream_smoke.py every six hours and at login, through launchd. It only does
-# real work when a Codex or Claude Code version changed or the last run failed, and shows a
-# macOS notification with the result. Output goes to ~/Library/Logs/peer-upstream.log.
+# Runs scripts/upstream_smoke.py every six hours and at login, through launchd. It does nothing
+# unless the daily upstream workflow has opened an issue; then it runs the real round trip once
+# per issue and set of installed versions, and shows a macOS notification with the result.
+# Needs gh signed in. Output goes to ~/Library/Logs/peer-upstream.log.
 #
 #   scripts/install_upstream_watch.sh              # install or update
 #   scripts/install_upstream_watch.sh --uninstall  # remove
@@ -40,7 +41,7 @@ cat >"$plist" <<EOF
   <array>
     <string>$python</string>
     <string>$repo/scripts/upstream_smoke.py</string>
-    <string>--if-changed</string>
+    <string>--if-flagged</string>
     <string>--notify</string>
   </array>
   <key>EnvironmentVariables</key>

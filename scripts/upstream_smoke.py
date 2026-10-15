@@ -10,10 +10,12 @@ Each run makes four small model calls: Claude Code on Haiku, Codex on its config
 at low effort. The sessions it starts are deleted afterwards.
 
     python3 scripts/upstream_smoke.py               # run now
-    python3 scripts/upstream_smoke.py --if-changed  # run only if a version changed or the last run failed
+    python3 scripts/upstream_smoke.py --if-flagged  # run only while the upstream workflow has an issue open
     python3 scripts/upstream_smoke.py --notify      # also show the result as a macOS notification
 
-scripts/install_upstream_watch.sh runs it on a schedule with --if-changed --notify.
+With --if-flagged it makes no model calls unless the daily upstream workflow has opened an
+issue, and then runs once per issue and set of installed versions. Checking for the issue
+uses the gh CLI. scripts/install_upstream_watch.sh runs it on a schedule with --if-flagged --notify.
 """
 
 from __future__ import annotations
@@ -55,6 +57,7 @@ STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "
 TIMEOUT = 600
 CLAUDE_MODEL = os.environ.get("PEER_SMOKE_CLAUDE_MODEL", "haiku")
 CODEX_MODEL = os.environ.get("PEER_SMOKE_CODEX_MODEL") or None
+ISSUE_TITLE = "Upstream check failed"
 QUESTION = "What is the code word from earlier in this conversation? Reply with the code word only."
 
 
@@ -185,19 +188,39 @@ def save_state(state: dict) -> None:
     STATE.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
 
 
+def flagged_issue() -> int | None:
+    """The open issue the upstream workflow filed, if any. Needs gh, signed in."""
+    proc = subprocess.run(
+        ["gh", "issue", "list", "--state", "open", "--search", f'in:title "{ISSUE_TITLE}"', "--json", "number"],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise PeerError(f"gh issue list failed: {proc.stderr.strip()[-500:]}")
+    issues = json.loads(proc.stdout or "[]")
+    return issues[0]["number"] if issues else None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument(
-        "--if-changed", action="store_true", help="skip unless a version changed or the last run failed"
-    )
+    parser.add_argument("--if-flagged", action="store_true", help="skip unless the upstream workflow has an issue open")
     parser.add_argument("--notify", action="store_true", help="show the result as a macOS notification")
     args = parser.parse_args(argv)
 
     versions = installed_versions()
-    previous = load_state()
-    changed = versions != previous.get("versions")
-    if args.if_changed and not changed and previous.get("ok"):
-        return 0
+    issue = None
+    if args.if_flagged:
+        try:
+            issue = flagged_issue()
+        except (PeerError, OSError, subprocess.SubprocessError, ValueError) as exc:
+            print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} could not check for an upstream issue: {exc}")
+            return 1
+        previous = load_state()
+        if issue is None or (previous.get("issue") == issue and previous.get("versions") == versions):
+            return 0
 
     print(time.strftime("%Y-%m-%d %H:%M:%S"), "versions:", json.dumps(versions))
     failures = []
@@ -209,13 +232,13 @@ def main(argv: list[str] | None = None) -> int:
             failures.append(problem)
 
     ok = not failures
-    save_state({"versions": versions, "ok": ok, "checked": time.strftime("%Y-%m-%dT%H:%M:%S"), "failures": failures})
+    save_state({"issue": issue, "versions": versions, "ok": ok, "checked": time.strftime("%Y-%m-%dT%H:%M:%S")})
     if args.notify:
-        # Alert once per broken set of versions, and confirm once when new versions pass.
-        if not ok and (changed or previous.get("ok", True)):
-            notify("peer may be broken by a Codex or Claude Code update: " + "; ".join(failures))
-        elif ok and changed and previous:
-            notify("peer still works after the Codex or Claude Code update.")
+        where = f"CI flagged a Codex or Claude Code update (issue #{issue}). " if issue else ""
+        if ok:
+            notify(where + "peer still works on this Mac.")
+        else:
+            notify(where + "peer is broken on this Mac: " + "; ".join(failures))
     print("ok" if ok else "FAILED: " + "; ".join(failures))
     return 0 if ok else 1
 

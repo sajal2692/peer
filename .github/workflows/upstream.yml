@@ -54,6 +54,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # scripts/upstream_smoke.py --if-flagged looks for this title.
           title="Upstream check failed: a new Codex or Claude Code release may break peer"
           {
             echo "The scheduled check against the newest CLIs (Codex ${{ matrix.codex }}) failed:"
