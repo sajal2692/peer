@@ -1,0 +1,75 @@
+name: upstream
+
+# Checks that the newest Codex and Claude Code CLIs still accept what peer sends them, so a
+# breaking release shows up before it reaches a Mac. Runs daily against the newest stable
+# Codex and the newest Codex alpha (the ChatGPT desktop app ships alpha builds), and opens or
+# updates an issue when a check fails. Needs no accounts; scripts/upstream_smoke.py covers
+# what needs one.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/upstream.yml
+      - scripts/check_upstream.py
+      - scripts/codex_features_reviewed.txt
+      - src/peer/runner.py
+      - src/peer/models.py
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        codex: [latest, alpha]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install the newest CLIs
+        run: |
+          codex="latest"
+          if [ "${{ matrix.codex }}" = "alpha" ]; then
+            codex="$(npm view @openai/codex versions --json | python3 -c '
+          import json, re, sys
+          versions = [v for v in json.load(sys.stdin) if re.fullmatch(r"\d+\.\d+\.\d+-alpha\.[\d.]+", v)]
+          key = lambda v: [int(n) for n in re.findall(r"\d+", v)]
+          print(max(versions, key=key))')"
+          fi
+          npm install --silent --prefix "$RUNNER_TEMP/clis" "@openai/codex@$codex" @anthropic-ai/claude-code@latest
+      - name: Check the CLIs
+        run: |
+          set -o pipefail
+          bin="$RUNNER_TEMP/clis/node_modules/.bin"
+          python3 scripts/check_upstream.py --codex "$bin/codex" --claude "$bin/claude" | tee "$RUNNER_TEMP/result.txt"
+      - name: Report the failure in an issue
+        if: failure() && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Upstream check failed: a new Codex or Claude Code release may break peer"
+          {
+            echo "The scheduled check against the newest CLIs (Codex ${{ matrix.codex }}) failed:"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/result.txt" 2>/dev/null || echo "(no output; see the run)"
+            echo '```'
+            echo
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } >"$RUNNER_TEMP/body.md"
+          number="$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')"
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh issue create --title "$title" --body-file "$RUNNER_TEMP/body.md"
+          fi
+    permissions:
+      contents: read
+      issues: write

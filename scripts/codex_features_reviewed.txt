@@ -1,0 +1,58 @@
+# Codex features that are on by default and that peer leaves on.
+# scripts/check_upstream.py fails when Codex turns on a feature that is in neither this file
+# nor CODEX_RISKY_FEATURES (src/peer/runner.py). Before adding a name here, check that the
+# feature cannot act outside the read-only sandbox; if it can, add it to CODEX_RISKY_FEATURES.
+#
+# Seeded on 2026-10-14 from Codex 0.145.0, 0.162.1 and 0.162.0-alpha.17.2. Names marked
+# "to review" may reach outside the sandbox and have not been checked yet.
+
+api_key_model_discovery
+auth_elicitation
+browser_annotation_api  # to review
+browser_use_full_cdp_access  # to review
+code_mode_host
+collaboration_modes
+compaction_image_budget
+content_item_kinds
+daemon_auto_start
+enable_request_compression
+fast_mode
+goals
+guardian_approval
+guardian_reuse_parent_compaction
+in_app_chat
+in_app_dictation
+in_app_updates
+in_app_voice
+instant_interrupt
+item_ids
+mentions_v2
+multi_agent
+personality
+plugin_sharing
+realtime_conversation
+remote_compaction_v2
+remote_plugin  # to review
+resize_all_images
+shell_snapshot
+shell_tool
+skill_mcp_dependency_install  # to review
+skill_search
+sleep_tool
+sqlite
+steer
+system_proxy_fallback
+terminal_resize_reflow
+tool_call_mcp_elicitation
+tool_search_always_defer_mcp_tools
+tool_suggest
+tui_app_server
+ultrafast_mode
+unbounded_connection_retries
+unified_exec
+unified_exec_tty
+unified_exec_zsh_fork
+view_image
+workspace_dependencies
+worktrees
+write_stdin_approval
