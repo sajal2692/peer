@@ -61,7 +61,7 @@ Model: gpt-5.5 | Effort: high
 Continue with Codex: codex resume 01a137ed-...
 ```
 
-Run the `Continue with` command in a terminal to keep talking to the other tool.
+Run the `Continue with` command in a terminal to keep talking to the other tool, or add `--continue` to your next `/peer` to send it there.
 
 ### When to use what
 
@@ -74,6 +74,8 @@ Run the `Continue with` command in a terminal to keep talking to the other tool.
 | Your tool to weigh in on the other's answer | add `--assess` | `/peer --assess` gets Codex's answer, then Claude Code says where they agree, where they differ and which is better. |
 | A stronger or faster model for this one call | add `--model` or `--effort` | `/peer --effort max review` for a careful review of a risky change. |
 | A faster answer on a very long session | add `--trim` | `/peer --trim` sends a shortened conversation. |
+| A follow-up to the other tool's last answer | add `--continue` | Codex proposed a change. `/peer --continue make it shorter` goes back to that same Codex session, with only what happened since. |
+| The other tool to act, not only answer | add `--write` | Codex drafted a budget entry. `/peer --continue --write add it` lets it run the command that records it. |
 
 ### Options and settings
 
@@ -86,6 +88,8 @@ Add options after `/peer` or `$peer` for one call:
 | `--details` | Show the full run: the exact commands, which message was answered, and how much was sent. |
 | `--trim` | Shorten long messages and tool output. By default the whole conversation is sent. |
 | `--no-web` | Keep the other tool off the web for this call. Web access is on by default. |
+| `--continue` | Continue the other tool's session from its last answer in this conversation, instead of starting a new one. Only the turns since that answer are sent. |
+| `--write` | Let the other tool change files in the folder and run commands with side effects for this call. Read-only by default. |
 
 Or save defaults for every call. Saved settings are shared between both tools:
 
@@ -94,7 +98,7 @@ Or save defaults for every call. Saved settings are shared between both tools:
 | `/peer models` | List the models and effort levels you can use. |
 | `/peer config` | Show the current settings. |
 | `/peer config codex model gpt-5.5` | Use this model whenever Codex answers (`claude model` for Claude Code). |
-| `/peer config assess on` | Always add the assessment. `details` and `trim` work the same way. |
+| `/peer config assess on` | Always add the assessment. `details`, `trim` and `continue` work the same way. |
 
 See [docs/configuration.md](docs/configuration.md) for every option, the config file and environment variables.
 
@@ -111,7 +115,8 @@ peer --help                                            # every option
 
 - **What is sent.** Your messages, the assistant's replies, tool calls and their output, attached files, pasted images, and context added by hooks. The paths of instruction files such as `CLAUDE.md` are listed so the other tool can read them. Hidden reasoning and the tools' own setup text are not sent.
 - **Sign-in and billing.** peer has no account or API keys of its own. It runs the `codex` and `claude` command-line tools, so each answer uses whatever those tools are signed in with: your ChatGPT plan or an OpenAI API key for Codex, and your Claude subscription or an Anthropic API key for Claude Code. If `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` is set, the tool may bill that key instead.
-- **Read-only.** The other tool can read files but cannot change them, run commands outside a read-only sandbox, or use connected apps such as mail or GitHub. It can search and fetch web pages. If you work with untrusted content, `--no-web` (or `/peer config web off`) keeps it offline, so nothing it reads can be sent to a website.
+- **Read-only unless you say so.** By default the other tool can read files but cannot change them, run commands outside a read-only sandbox, or use connected apps such as mail or GitHub. It can search and fetch web pages. If you work with untrusted content, `--no-web` (or `/peer config web off`) keeps it offline, so nothing it reads can be sent to a website. `--write` lifts the read-only part for one call: Codex runs in its workspace-write sandbox with network access, and Claude Code gets its editing and shell tools, approved without asking. Connected apps, plugins and MCP servers stay off either way, so a tool the other side reaches through MCP is still out of reach; one it runs as a command, such as a CLI, works.
+- **Sessions.** Each `/peer` starts a new session in the other tool unless you add `--continue` (or `/peer config continue on`). peer never writes into your own sessions in either tool.
 - **Speed.** An answer takes from a few seconds to several minutes, depending on the model, the effort and the length of the conversation. If a very long conversation fails or is slow, try `--trim`.
 - **Scope.** Regular ChatGPT and claude.ai chats are not supported, because their history is not stored on your computer.
 

@@ -20,7 +20,10 @@ Add these after `/peer` or `$peer`, or pass them to `peer` in a terminal.
 | `--budget N` | Keep the transcript under N characters. The oldest turns go first, but the first turn is always kept. |
 | `--no-tools` | Leave tool calls and results out. |
 | `--current-turn` | Answer the latest message instead of treating it as the request for peer. For an agent that consults its peer on its own. |
-| `--ephemeral` | Don't keep the other tool's session, so there is no `Continue with` line. |
+| `--write` | Let the other tool change files in the folder and run commands with side effects, such as a CLI that writes to a service. Codex runs with `--sandbox workspace-write` and network access; Claude Code gets `Edit`, `Write` and `Bash`, approved without asking. Connected apps, plugins, MCP servers and hooks stay off. Read-only by default. |
+| `--continue`, `--no-continue` | Whether to continue the other tool's session from its last answer in this conversation (found from the `Continue with` line) instead of starting a new one. Only the turns since that answer are sent, without the turns that ran peer. With no earlier answer, a new session starts. Off by default. |
+| `--resume <id>` | Continue this session of the other tool. If its answer is in the conversation, only the turns since are sent; otherwise the whole conversation is. |
+| `--ephemeral` | Don't keep the other tool's session, so there is no `Continue with` line. Can't be combined with `--continue` or `--resume`. |
 | `--timeout S` | Seconds to wait for the answer. The default is 1800. |
 | `--dry-run` | Print the full header and the prompt without sending anything. |
 
@@ -65,6 +68,7 @@ Settings you save apply to every call, from both tools and the terminal.
 | `/peer config trim on\|off` | Always, or never, trim. |
 | `/peer config web on\|off` | Allow web access (the default), or keep the other tool offline. |
 | `/peer config budget <chars>` | Always cap the transcript at this many characters. |
+| `/peer config continue on\|off` | Always, or never, continue the other tool's session from its last answer here. |
 
 `codex` and `claude` name the tool that answers, not the one you are in. In Codex, type `$peer config ...`, and in a terminal, `peer config ...`. Use `default` as the value to clear a setting, for example `/peer config codex model default`.
 
@@ -79,6 +83,7 @@ Settings live in `~/.config/peer/config.json`. `peer config` writes it, and you 
   "assess": false,
   "details": false,
   "trim": false,
+  "continue": false,
   "budget": 600000
 }
 ```
@@ -91,7 +96,7 @@ Every key is optional.
 |---|---|
 | `PEER_CODEX_MODEL`, `PEER_CODEX_EFFORT` | Model and effort when Codex answers. |
 | `PEER_CLAUDE_MODEL`, `PEER_CLAUDE_EFFORT` | Model and effort when Claude Code answers. |
-| `PEER_ASSESS`, `PEER_DETAILS`, `PEER_TRIM`, `PEER_WEB` | `1` for on, `0` for off. |
+| `PEER_ASSESS`, `PEER_DETAILS`, `PEER_TRIM`, `PEER_WEB`, `PEER_CONTINUE` | `1` for on, `0` for off. |
 | `PEER_CONFIG` | Use a different config file. |
 | `PEER_CODEX_BIN`, `PEER_CLAUDE_BIN` | Use a specific `codex` or `claude` binary. By default peer picks the newest it can find, including the Codex inside the ChatGPT app. |
 | `PEER_INSTALL_DIR` | Where the one-line installer keeps its copy of peer. The default is `~/.local/share/peer`. |

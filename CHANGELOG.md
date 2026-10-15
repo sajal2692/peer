@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+**Changes**
+- `--write` lets the other tool act for one call: Codex runs in its workspace-write sandbox with network access, and Claude Code gets `Edit`, `Write` and `Bash`. Read-only stays the default, and connected apps, plugins and MCP servers stay off.
+- `--continue` sends a follow-up to the same session of the other tool that gave the last answer in this conversation, with only the turns since then. `peer config continue on` makes it the default, and `--resume <id>` picks a session by id. Each call still starts a new session by default.
+
 ## 0.1.1
 
 **Install**

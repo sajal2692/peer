@@ -43,6 +43,10 @@ def short_header(run: Run, request: Request, answer: Answer | None, assess: Sett
         stats.append(f"Effort: {effort}")
     if assess.value == "on":
         stats.append("Assessment: on")
+    if run.write:
+        stats.append("Write access: on")
+    if run.resume:
+        stats.append(f"Continued session: {run.resume}")
     lines = [f"## {peer}'s answer", "", " | ".join(stats)]
     if request.target_label not in ("User", "Question"):
         # The peer answered something the user did not type; say so even in short form.
@@ -64,6 +68,8 @@ def header(
         context = f"no history, {len(request.prompt):,} characters sent"
     if request.turns_omitted:
         context += " (the oldest turns after the first were left out to fit the budget)"
+    if request.continued:
+        context += f" since {peer}'s last answer"
     context += f"; {request.limits.describe()}"
     settings = setting_text("Model", run.model, answer.model if answer else None)
     if run.effort.value or (answer and answer.effort):
@@ -79,5 +85,7 @@ def header(
         f"Context: {context}",
         f"Web access: {'on' if run.web else 'off'}",
         f"Assessment: {assess.value} ({assess.source if assess.source == 'default' else 'from ' + assess.source})",
+        f"Access: {'write (can change files and run commands)' if run.write else 'read-only'}",
+        f"{peer} session: {'continued ' + run.resume if run.resume else 'new'}",
     ]
     return "\n".join(lines)

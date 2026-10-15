@@ -99,6 +99,7 @@ CONFIG_USAGE = """Change a setting:
   peer config details on|off          full run header instead of the stats line
   peer config trim on|off             cut long messages and tool output with sensible limits
   peer config web on|off              let the peer search and fetch web pages
+  peer config continue on|off         continue the peer's session from its last answer here
   peer config budget <chars>          most transcript characters to send ("default" for no limit)"""
 
 
@@ -118,7 +119,12 @@ def show_config() -> str:
                     f"{key} {own} ({TOOL_NAMES[tool]}'s own config)" if own else f"{key}: {TOOL_NAMES[tool]}'s default"
                 )
         lines.append(f"When {TOOL_NAMES[tool]} answers: " + ", ".join(parts))
-    for key, label in (("assess", "Assessment"), ("details", "Full header"), ("web", "Web access")):
+    for key, label in (
+        ("assess", "Assessment"),
+        ("details", "Full header"),
+        ("web", "Web access"),
+        ("continue", "Continue the peer's session"),
+    ):
         setting = resolve_switch(key, None, config)
         source = "default" if setting.source == "default" else f"from {setting.source}"
         lines.append(f"{label}: {setting.value} ({source})")
@@ -148,7 +154,11 @@ def config_command(words: list[str]) -> int:
                 config[tool] = section
             else:
                 config.pop(tool, None)
-        elif len(words) == 2 and words[0] in ("assess", "details", "trim", "web") and words[1].lower() in ("on", "off"):
+        elif (
+            len(words) == 2
+            and words[0] in ("assess", "details", "trim", "web", "continue")
+            and words[1].lower() in ("on", "off")
+        ):
             config[words[0]] = words[1].lower() == "on"
         elif len(words) == 2 and words[0] == "budget" and (words[1].isdigit() or words[1] == "default"):
             if words[1] == "default":
