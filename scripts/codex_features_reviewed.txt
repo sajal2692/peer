@@ -3,14 +3,17 @@
 # nor CODEX_RISKY_FEATURES (src/peer/runner.py). Before adding a name here, check that the
 # feature cannot act outside the read-only sandbox; if it can, add it to CODEX_RISKY_FEATURES.
 #
-# Seeded on 2026-10-14 from Codex 0.145.0, 0.162.1 and 0.162.0-alpha.17.2. Names marked
+# Seeded on 2026-10-14 from Codex 0.145.0, 0.162.1, 0.162.0-alpha.17.2 and 0.163.0-alpha.11. Names marked
 # "to review" may reach outside the sandbox and have not been checked yet.
 
+api_key_cyber_access_programs  # to review
 api_key_model_discovery
 auth_elicitation
 browser_annotation_api  # to review
 browser_use_full_cdp_access  # to review
+cli_daybreak  # to review
 code_mode_host
+code_mode_interrupt  # to review
 collaboration_modes
 compaction_image_budget
 content_item_kinds
