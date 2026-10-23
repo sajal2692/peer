@@ -44,7 +44,7 @@ def short_header(run: Run, request: Request, answer: Answer | None, assess: Sett
     if assess.value == "on":
         stats.append("Assessment: on")
     if run.write:
-        stats.append("Write access: on")
+        stats.append("Access: write")
     if run.resume:
         stats.append(f"Continued session: {run.resume}")
     lines = [f"## {peer}'s answer", "", " | ".join(stats)]
@@ -85,7 +85,7 @@ def header(
         f"Context: {context}",
         f"Web access: {'on' if run.web else 'off'}",
         f"Assessment: {assess.value} ({assess.source if assess.source == 'default' else 'from ' + assess.source})",
-        f"Access: {'write (can change files and run commands)' if run.write else 'read-only'}",
+        f"Access: {run.access.value} ({run.access.source})",
         f"{peer} session: {'continued ' + run.resume if run.resume else 'new'}",
     ]
     return "\n".join(lines)

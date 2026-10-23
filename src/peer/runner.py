@@ -340,9 +340,11 @@ class Run:
         web: bool = False,
         write: bool = False,
         resume: str | None = None,
+        access: Setting | None = None,
     ):
         self.peer, self.cwd, self.model, self.effort, self.args, self.web = peer, cwd, model, effort, args, web
         self.write, self.resume = write, resume
+        self.access = access or Setting("write" if write else "read-only", "--write" if write else "default")
         binary = find_binary(peer)
         if peer == "codex":
             # A dry run only shows the command, so it skips probing Codex's features.

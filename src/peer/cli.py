@@ -15,7 +15,15 @@ from .output import header, short_header
 from .request import TRIM_DEFAULTS, build_request, last_peer_session
 from .runner import Run
 from .sessions import resolve_session
-from .settings import config_command, load_config, resolve_assess, resolve_limits, resolve_setting, resolve_switch
+from .settings import (
+    config_command,
+    load_config,
+    resolve_access,
+    resolve_assess,
+    resolve_limits,
+    resolve_setting,
+    resolve_switch,
+)
 from .transcript import IMAGE_REF_RE, Session, save_images
 
 
@@ -80,8 +88,18 @@ def parse_args(argv: list[str]):
     )
     parser.add_argument(
         "--write",
-        action="store_true",
-        help="let the peer change files in the folder and run commands with side effects (default: read-only)",
+        dest="access",
+        action="store_const",
+        const="write",
+        help="let the peer change files in the folder and run commands with side effects "
+        "(default: match what this session may do)",
+    )
+    parser.add_argument(
+        "--read-only",
+        dest="access",
+        action="store_const",
+        const="read-only",
+        help="keep the peer read-only, whatever this session may do",
     )
     parser.add_argument(
         "--continue",
@@ -89,7 +107,7 @@ def parse_args(argv: list[str]):
         action=argparse.BooleanOptionalAction,
         default=None,
         help="continue the peer session from the last peer answer in this conversation instead of starting a "
-        'new one (default: off; PEER_CONTINUE or "continue" in the config file change it)',
+        'new one (default: on; --no-continue, PEER_CONTINUE=0 or "continue" in the config file turn it off)',
     )
     parser.add_argument("--resume", metavar="ID", help="continue this peer session id")
     parser.add_argument("--ephemeral", action="store_true", help="do not keep the peer session")
@@ -154,7 +172,9 @@ def main(argv: list[str] | None = None) -> int:
                 )
         if resume and args.ephemeral:
             raise PeerError("--ephemeral starts a session that is not kept, so it cannot continue one.")
-        request = build_request(session, peer, mode, text, drop, limits, args.write, resume)
+        access = resolve_access(args.access, config, session.tool, session.permissions)
+        write = access.value == "write"
+        request = build_request(session, peer, mode, text, drop, limits, write, resume)
         request.limits = limits
         cwd = session.cwd if session.cwd and os.path.isdir(session.cwd) else os.getcwd()
         assess = resolve_assess(args.assess, config)
@@ -167,8 +187,9 @@ def main(argv: list[str] | None = None) -> int:
             resolve_setting(peer, "effort", args.effort, config),
             args,
             web,
-            args.write,
+            write,
             resume,
+            access,
         )
     except PeerError as exc:
         print(f"peer: {exc}", file=sys.stderr)

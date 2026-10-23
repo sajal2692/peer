@@ -20,8 +20,8 @@ Add these after `/peer` or `$peer`, or pass them to `peer` in a terminal.
 | `--budget N` | Keep the transcript under N characters. The oldest turns go first, but the first turn is always kept. |
 | `--no-tools` | Leave tool calls and results out. |
 | `--current-turn` | Answer the latest message instead of treating it as the request for peer. For an agent that consults its peer on its own. |
-| `--write` | Let the other tool change files in the folder and run commands with side effects, such as a CLI that writes to a service. Codex runs with `--sandbox workspace-write` and network access; Claude Code gets `Edit`, `Write` and `Bash`, approved without asking. Connected apps, plugins, MCP servers and hooks stay off. Read-only by default. |
-| `--continue`, `--no-continue` | Whether to continue the other tool's session from its last answer in this conversation (found from the `Continue with` line) instead of starting a new one. Only the turns since that answer are sent, without the turns that ran peer. With no earlier answer, a new session starts. Off by default. |
+| `--write`, `--read-only` | Let the other tool change files in the folder and run commands with side effects, such as a CLI that writes to a service, or keep it read-only. Without either, it matches your session (see [Access](#access)). |
+| `--continue`, `--no-continue` | Whether to continue the other tool's session from its last answer in this conversation (found from the `Continue with` line) instead of starting a new one. Only the turns since that answer are sent, without the turns that ran peer. With no earlier answer, a new session starts. On by default. |
 | `--resume <id>` | Continue this session of the other tool. If its answer is in the conversation, only the turns since are sent; otherwise the whole conversation is. |
 | `--ephemeral` | Don't keep the other tool's session, so there is no `Continue with` line. Can't be combined with `--continue` or `--resume`. |
 | `--timeout S` | Seconds to wait for the answer. The default is 1800. |
@@ -68,7 +68,8 @@ Settings you save apply to every call, from both tools and the terminal.
 | `/peer config trim on\|off` | Always, or never, trim. |
 | `/peer config web on\|off` | Allow web access (the default), or keep the other tool offline. |
 | `/peer config budget <chars>` | Always cap the transcript at this many characters. |
-| `/peer config continue on\|off` | Always, or never, continue the other tool's session from its last answer here. |
+| `/peer config continue on\|off` | Continue the other tool's session from its last answer here (the default), or start a new one each time. |
+| `/peer config access match\|read-only\|write` | Match your session's permissions (the default), always stay read-only, or always allow writing. |
 
 `codex` and `claude` name the tool that answers, not the one you are in. In Codex, type `$peer config ...`, and in a terminal, `peer config ...`. Use `default` as the value to clear a setting, for example `/peer config codex model default`.
 
@@ -83,7 +84,8 @@ Settings live in `~/.config/peer/config.json`. `peer config` writes it, and you 
   "assess": false,
   "details": false,
   "trim": false,
-  "continue": false,
+  "continue": true,
+  "access": "read-only",
   "budget": 600000
 }
 ```
@@ -97,6 +99,7 @@ Every key is optional.
 | `PEER_CODEX_MODEL`, `PEER_CODEX_EFFORT` | Model and effort when Codex answers. |
 | `PEER_CLAUDE_MODEL`, `PEER_CLAUDE_EFFORT` | Model and effort when Claude Code answers. |
 | `PEER_ASSESS`, `PEER_DETAILS`, `PEER_TRIM`, `PEER_WEB`, `PEER_CONTINUE` | `1` for on, `0` for off. |
+| `PEER_ACCESS` | `match`, `read-only` or `write`. |
 | `PEER_CONFIG` | Use a different config file. |
 | `PEER_CODEX_BIN`, `PEER_CLAUDE_BIN` | Use a specific `codex` or `claude` binary. By default peer picks the newest it can find, including the Codex inside the ChatGPT app. |
 | `PEER_INSTALL_DIR` | Where the one-line installer keeps its copy of peer. The default is `~/.local/share/peer`. |
@@ -112,6 +115,22 @@ When a setting is given in more than one place, peer uses the first it finds:
 2. An environment variable, such as `PEER_CODEX_MODEL`
 3. The config file
 4. The other tool's own configuration
+
+## Access
+
+By default the other tool gets the same kind of access as the session you ask from. If Claude Code is in auto, accept-edits or bypass-permissions mode, or Codex runs in its workspace-write or full-access sandbox, the other tool may change files and run commands. Otherwise it is read-only: Claude Code's default mode asks before each edit, plan mode doesn't edit, and the headless peer can't ask you, so it reads only.
+
+| Your session | The other tool |
+|---|---|
+| Claude Code in `auto`, `acceptEdits` or `bypassPermissions` mode | Codex with `--sandbox workspace-write` and network access |
+| Claude Code in `default`, `plan` or `dontAsk` mode | Codex with `--sandbox read-only` |
+| Codex with the `workspace-write` or `danger-full-access` sandbox | Claude Code with `Edit`, `Write` and `Bash`, in `acceptEdits` mode |
+| Codex with the `read-only` sandbox | Claude Code with `Read`, `Grep` and `Glob` |
+| A terminal, or a transcript that doesn't record its permissions | read-only |
+
+peer reads your session's current setting from its transcript: Claude Code records the permission mode on each message, and Codex records the sandbox at the start of each turn. If you switch modes mid-session, the next call follows the latest one.
+
+Write access is never broader than this: Codex never gets full access, only the folder (plus temporary folders) and the network, and in both tools connected apps, plugins, MCP servers and hooks stay off.
 
 ## Models
 

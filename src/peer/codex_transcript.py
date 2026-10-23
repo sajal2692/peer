@@ -118,9 +118,13 @@ def is_completed_item(row: dict) -> bool:
 def parse_codex(path: Path) -> Session:
     rows = list(read_jsonl(path))
     cwd = None
+    sandbox = None
     for r in rows:
         if r.get("type") in ("session_meta", "turn_context"):
             cwd = (r.get("payload") or {}).get("cwd") or cwd
+        if r.get("type") == "turn_context":
+            policy = (r.get("payload") or {}).get("sandbox_policy")
+            sandbox = (policy.get("type") if isinstance(policy, dict) else policy) or sandbox
     images: list = []
     # A thread started on an older Codex and continued on a newer one has both formats: the
     # old one up to the first item_completed event, the new one after it.
@@ -129,4 +133,6 @@ def parse_codex(path: Path) -> Session:
     for row in rows[first:]:
         if is_completed_item(row):
             items += codex_item(row["payload"]["item"], images)
-    return Session("codex", path, cwd, merge_assistant(items), images)
+    session = Session("codex", path, cwd, merge_assistant(items), images)
+    session.permissions = sandbox if isinstance(sandbox, str) else None
+    return session
