@@ -9,7 +9,7 @@ In Claude Code, type `/peer` and Codex answers. In Codex, type `$peer` and Claud
 ## Prerequisites
 
 - **macOS.** Linux should work, but it is untested.
-- **Python 3.9 or newer and git.** Check with `python3 --version` and `git --version`. Both come with the Xcode Command Line Tools: `xcode-select --install`.
+- **Python 3.12 or newer, and git.** The `python3` that comes with macOS is 3.9, which is too old. Install a newer one with `brew install python` or from [python.org](https://www.python.org/downloads/macos/). git comes with the Xcode Command Line Tools: `xcode-select --install`. The installer finds a suitable Python on its own; set `PEER_PYTHON` to its path if it doesn't.
 - **Codex, signed in.** Either the Codex CLI or Codex in the ChatGPT desktop app.
 - **The Claude Code CLI, signed in.** `$peer` runs the `claude` command even if you use the Claude desktop app, and that command signs in separately from the app. Check with `claude auth status`, and run `claude auth login` if needed.
 

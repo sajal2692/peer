@@ -57,4 +57,26 @@ if [ -e "$fresh/.local/bin/peer" ] || [ -e "$fresh/.local/share/peer" ]; then
   echo "a cut-off installer must not install anything" >&2
   exit 1
 fi
+# An install from before the launcher (a symlink to peer.py) is replaced by the launcher.
+upgrade="$work/upgrade-home"
+mkdir -p "$upgrade/.local/bin"
+ln -s "$repo/peer.py" "$upgrade/.local/bin/peer"
+HOME="$upgrade" bash "$repo/install.sh" >/dev/null
+grep -q "peer launcher, written by install.sh" "$upgrade/.local/bin/peer"
+HOME="$upgrade" "$upgrade/.local/bin/peer" --version
+
+# Without Python 3.12 or newer, the installer stops with a clear error.
+old="$work/old-python"
+mkdir -p "$old/bin" "$work/old-home"
+printf '#!/bin/sh\nexit 1\n' > "$old/bin/python3"
+chmod +x "$old/bin/python3"
+if out="$(HOME="$work/old-home" PEER_PYTHON_SEARCH="$old/bin/python3" bash "$repo/install.sh" 2>&1)"; then
+  echo "expected the installer to refuse without Python 3.12 or newer" >&2
+  exit 1
+fi
+case "$out" in
+  *"needs Python 3.12 or newer"*) ;;
+  *) echo "unexpected installer output without Python 3.12: $out" >&2; exit 1 ;;
+esac
+
 echo "one-line installer: ok"

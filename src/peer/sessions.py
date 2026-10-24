@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import glob
+import itertools
 import os
 import re
 import sys
@@ -40,7 +41,7 @@ def is_peer_session(path: Path) -> bool:
     """True for sessions that peer itself started in the other tool."""
     try:
         rows = read_jsonl(path)
-        for _, row in zip(range(40), rows):
+        for row in itertools.islice(rows, 40):
             if row.get("type") == "user":  # Claude Code
                 return blocks_text((row.get("message") or {}).get("content")).startswith(MARKER)
             payload = row.get("payload") or {}
@@ -75,7 +76,7 @@ def find_latest(tool: str, cwd: str) -> Path | None:
 def sniff_format(path: Path) -> str:
     """Which tool wrote a transcript file, from its rows; the folder decides only as a fallback."""
     try:
-        for _, row in zip(range(20), read_jsonl(path)):
+        for row in itertools.islice(read_jsonl(path), 20):
             if row.get("type") in ("session_meta", "response_item", "event_msg", "turn_context"):
                 return "codex"
             if row.get("type") in ("user", "assistant", "attachment", "summary", "system"):
