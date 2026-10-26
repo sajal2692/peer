@@ -50,6 +50,42 @@ link() {
   echo "linked $dest -> $src"
 }
 
+# A Python 3.12 or later: PEER_PYTHON, then python3, then versioned names on PATH, then the
+# usual Homebrew locations. PEER_PYTHON_SEARCH replaces that list (the tests use it).
+# macOS's own python3 is 3.9, too old for peer.
+find_python() {
+  local candidate path
+  local search="${PEER_PYTHON_SEARCH:-python3 python3.15 python3.14 python3.13 python3.12 /opt/homebrew/bin/python3 /usr/local/bin/python3}"
+  # shellcheck disable=SC2086 # the search list is split on spaces on purpose
+  for candidate in "${PEER_PYTHON:-}" $search; do
+    [ -n "$candidate" ] || continue
+    path="$(command -v "$candidate" 2>/dev/null)" || continue
+    if "$path" -c 'import sys; sys.exit(sys.version_info < (3, 12))' 2>/dev/null; then
+      echo "$path"
+      return 0
+    fi
+  done
+  return 1
+}
+
+LAUNCHER_MARK="# peer launcher, written by install.sh"
+
+# Writes the peer command as a small script that runs peer.py with the Python found above, so
+# the desktop apps, which often don't see your shell's PATH, use that Python too.
+write_launcher() {
+  local python="$1" script="$2" dest="$3"
+  mkdir -p "$(dirname "$dest")"
+  if [ -e "$dest" ] && [ ! -L "$dest" ] && ! grep -qF "$LAUNCHER_MARK" "$dest"; then
+    echo "error: $dest exists and was not written by peer; move it aside and run install.sh again" >&2
+    failed=1
+    return
+  fi
+  rm -f "$dest"
+  printf '#!/bin/sh\n%s\nexec %q %q "$@"\n' "$LAUNCHER_MARK" "$python" "$script" > "$dest"
+  chmod +x "$dest"
+  echo "wrote $dest (runs $script with $python)"
+}
+
 main() {
   local source_file="$1"
   if [ -z "$source_file" ] || [ ! -f "$source_file" ] || [ ! -f "$(dirname "$source_file")/peer.py" ]; then
@@ -63,17 +99,15 @@ main() {
   codex_home="${CODEX_HOME:-$HOME/.codex}"
   failed=0
 
-  if ! command -v python3 >/dev/null 2>&1; then
-    echo "error: python3 is not on PATH; peer needs Python 3.9 or newer" >&2
-    exit 1
-  fi
-  if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 9))'; then
-    echo "error: peer needs Python 3.9 or newer; python3 is $(python3 --version 2>&1)" >&2
+  local python
+  if ! python="$(find_python)"; then
+    echo "error: peer needs Python 3.12 or newer, and none was found." \
+      "Install one (brew install python, or from python.org), or set PEER_PYTHON to its path." >&2
     exit 1
   fi
 
   chmod +x "$repo/peer.py"
-  link "$repo/peer.py" "$bin_dir/peer"
+  write_launcher "$python" "$repo/peer.py" "$bin_dir/peer"
   link "$repo/skills/claude/peer" "$claude_home/skills/peer"
   link "$repo/skills/codex/peer" "$codex_home/skills/peer"
 
@@ -87,7 +121,7 @@ main() {
     *) echo "note: $bin_dir is not on your PATH. The skills call peer by its full path, so they work;" \
             "to run peer yourself, add this to your shell profile: export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
   esac
-  echo "Installed peer $("$repo/peer.py" --version | cut -d' ' -f2). Restart Claude Code and Codex to load the skills."
+  echo "Installed peer $("$python" "$repo/peer.py" --version | cut -d' ' -f2). Restart Claude Code and Codex to load the skills."
 }
 
 # Empty when the script arrives on stdin, as with curl | bash. Inside a function it would

@@ -8,7 +8,7 @@ uvx ruff@0.17.0 check . && uvx ruff@0.17.0 format --check .
 python3 scripts/check_dashes.py                # the project avoids em dashes
 ```
 
-peer uses only the Python standard library and runs on Python 3.9 or newer. `peer.py` is a small launcher that `install.sh` links onto PATH; the code is the `peer` package in `src/peer`:
+peer uses only the Python standard library and runs on Python 3.12 or newer. `peer.py` is a small launcher; `install.sh` finds a Python 3.12 or newer and writes `~/.local/bin/peer` as a script that runs `peer.py` with it, since the desktop apps often don't see your shell's PATH; the code is the `peer` package in `src/peer`:
 
 | Module | What it does |
 |---|---|
@@ -26,7 +26,7 @@ peer uses only the Python standard library and runs on Python 3.9 or newer. `pee
 
 The skills live in `skills/claude/peer` and `skills/codex/peer`. `tests/test_cli.py` runs peer end to end against fake `codex` and `claude` binaries, so the tests need neither tool installed.
 
-CI runs on every push and pull request: lint, the tests on Ubuntu with Python 3.9, 3.12, 3.13, 3.14 and 3.15 and on macOS with Python 3.9, a non-blocking run on the newest Python build including pre-releases, a coverage floor of 80 percent, and a test install into an empty home folder. The `upstream` workflow also runs daily; see below.
+CI runs on every push and pull request: lint, the tests on Ubuntu with Python 3.12, 3.13, 3.14 and 3.15 and on macOS with Python 3.12, a non-blocking run on the newest Python build including pre-releases, a coverage floor of 80 percent, and a test install into an empty home folder. The `upstream` workflow also runs daily; see below.
 
 ## When Codex or Claude Code update
 

@@ -102,6 +102,7 @@ Every key is optional.
 | `PEER_ACCESS` | `match`, `read-only` or `write`. |
 | `PEER_CONFIG` | Use a different config file. |
 | `PEER_CODEX_BIN`, `PEER_CLAUDE_BIN` | Use a specific `codex` or `claude` binary. By default peer picks the newest it can find, including the Codex inside the ChatGPT app. |
+| `PEER_PYTHON` | The Python 3.12 or newer for the installer to use. By default it tries `python3`, then `python3.15` down to `python3.12`, then Homebrew's. |
 | `PEER_INSTALL_DIR` | Where the one-line installer keeps its copy of peer. The default is `~/.local/share/peer`. |
 | `CLAUDE_CONFIG_DIR`, `CODEX_HOME` | Where Claude Code and Codex keep their sessions, if not `~/.claude` and `~/.codex`. |
 
