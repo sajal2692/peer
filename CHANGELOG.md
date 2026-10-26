@@ -1,11 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 **Changes**
+- peer now needs Python 3.12 or newer. macOS's own `python3` is 3.9, so install a newer one first (`brew install python` or python.org). The installer finds it, or uses `PEER_PYTHON`, and writes `~/.local/bin/peer` as a small script that runs peer with that Python, so the desktop apps use it too. Running peer with an older Python stops with a clear message.
 - The other tool now gets the same kind of access as the session you ask from. When your session may change files and run commands on its own (Claude Code in auto, accept-edits or bypass-permissions mode, or Codex in a workspace-write or full-access sandbox), so may the other tool: Codex runs in its workspace-write sandbox with network access, and Claude Code gets `Edit`, `Write` and `Bash`. Otherwise it stays read-only. `--read-only`, `--write` and `peer config access` override this. Connected apps, plugins and MCP servers stay off either way.
 - A later `/peer` in the same conversation continues the other tool's session from its last answer, sending only the turns since then. `--no-continue` or `peer config continue off` starts a new session, and `--resume <id>` picks one by id.
-- peer now needs Python 3.12 or newer. macOS's own `python3` is 3.9, so install a newer one first (`brew install python` or python.org). The installer finds it, or uses `PEER_PYTHON`, and writes `~/.local/bin/peer` as a small script that runs peer with that Python, so the desktop apps use it too. Running peer with an older Python stops with a clear message.
+- A daily check runs peer's contract tests against the newest Codex and Claude Code releases, alpha included, and opens an issue when a change would break peer.
 
 ## 0.1.1
 
