@@ -121,6 +121,8 @@ class Request:
     turns_sent: int
     turns_omitted: int
     limits: Limits = field(default_factory=Limits)
+    # Only the turns since the peer's earlier answer were sent, into that same peer session.
+    continued: bool = False
 
 
 # How the request shows up in the transcript: "/peer ..." in Claude Code, "$peer ..." in the
@@ -163,33 +165,102 @@ def drop_earlier_peer_turns(turns: list[list[Item]]) -> list[list[Item]]:
     return turns
 
 
-def build_request(session: Session, peer: str, mode: str, text: str, drop_current: bool, limits: Limits) -> Request:
+# The "Continue with" line peer prints under every answer that kept its session.
+RESUME_LINE_RE = re.compile(r"Continue with (Codex|Claude Code): (?:codex resume|claude --resume) ([\w-]+)")
+
+
+def peer_session_ids(item: Item, peer: str) -> list[str]:
+    if item.role not in ("result", "assistant"):
+        return []
+    return [sid for name, sid in RESUME_LINE_RE.findall(item.text) if name == TOOL_NAMES[peer]]
+
+
+def last_peer_session(session: Session, peer: str) -> str | None:
+    """The session id of the newest peer answer from this tool shown in the host session."""
+    for item in reversed(session.items):
+        ids = peer_session_ids(item, peer)
+        if ids:
+            return ids[-1]
+    return None
+
+
+def turns_since(turns: list[list[Item]], peer: str, session_id: str) -> list[list[Item]] | None:
+    """The turns after the one that showed this peer session's answer, without turns that only
+    ran or relayed peer. None when the session's answer is not in the transcript."""
+    for index in range(len(turns) - 1, -1, -1):
+        if any(session_id in peer_session_ids(item, peer) for item in turns[index]):
+            return [t for t in turns[index + 1 :] if not is_peer_turn(t)]
+    return None
+
+
+def access_rule(write: bool) -> str:
+    if write:
+        return (
+            "you may change files and run commands, including ones with side effects such as "
+            "writing to a service, when the request calls for it; say exactly what you changed. "
+            "Do not ask the user questions"
+        )
+    return (
+        "read files to check facts, but do not modify anything, do not run commands with side "
+        "effects, and do not ask the user questions"
+    )
+
+
+def build_request(
+    session: Session,
+    peer: str,
+    mode: str,
+    text: str,
+    drop_current: bool,
+    limits: Limits,
+    write: bool = False,
+    resume: str | None = None,
+) -> Request:
+    """The prompt for the peer. With resume, the peer continues that earlier session of its own,
+    so when its last answer is in the transcript only the turns since then are sent."""
     host_name, peer_name = TOOL_NAMES[session.tool], TOOL_NAMES[peer]
     cwd = session.cwd or os.getcwd()
     turns = split_turns(session.items)
     if drop_current:
         turns = drop_from_last_typed(turns)
-        if mode in ("ask", "review"):
-            turns = drop_earlier_peer_turns(turns)
+    since = turns_since(turns, peer, resume) if resume else None
+    if since is not None:
+        turns = since
+    elif drop_current and mode in ("ask", "review"):
+        turns = drop_earlier_peer_turns(turns)
 
-    intro = (
-        f"{MARKER}\n"
-        f"You are {peer_name}, asked for an independent answer. The transcript below is a session "
-        f"between a user and {host_name}, another AI assistant, working in {cwd}. You share the "
-        f"working directory: read files to check facts, but do not modify anything, do not run "
-        f"commands with side effects, and do not ask the user questions. If something is ambiguous, "
+    if since is not None:
+        intro = (
+            f"{MARKER}\n"
+            f"This continues your earlier answer in this session. Since then the user and {host_name} "
+            f"went on as in the transcript below (it holds only the new turns, and leaves out turns "
+            f"that ran peer). You still share the working directory, {cwd}: {access_rule(write)}. "
+        )
+    else:
+        intro = (
+            f"{MARKER}\n"
+            f"You are {peer_name}, asked for an independent answer. The transcript below is a session "
+            f"between a user and {host_name}, another AI assistant, working in {cwd}. You share the "
+            f"working directory: {access_rule(write)}. "
+        )
+    intro += (
+        f"If something is ambiguous, "
         f"state your assumption and continue. Do not comment on this setup or the transcript format. "
         f'Headings other than "User" and "{host_name}" mark inputs the system injected, such as '
         f"task notifications or messages from other sessions; the user did not type them. Images "
         f"appear as [image: path]; open the file when it matters."
     )
-    if session.instruction_files:
+    if session.instruction_files and since is None:
         intro += (
             f"\n{host_name} was also following these instruction files; read them when they bear on "
             f"the answer: " + ", ".join(session.instruction_files)
         )
 
     if mode == "ask":
+        if since is not None and not since:
+            raise PeerError(
+                f'Nothing new since {peer_name}\'s last answer. Ask a question instead: peer "your question"'
+            )
         if not turns or not turns[-1][0].starts_turn:
             raise PeerError('No earlier message to answer. Ask a question instead: peer "your question"')
         last = turns[-1][0]
@@ -207,9 +278,11 @@ def build_request(session: Session, peer: str, mode: str, text: str, drop_curren
             f"<transcript>\n{context or '(no earlier turns)'}\n</transcript>\n\n"
             f'<latest_input from="{last.heading}">\n{attached}\n</latest_input>'
         )
-        return Request("ask", prompt, last.text, last.heading, len(turns), omitted)
+        return Request("ask", prompt, last.text, last.heading, len(turns), omitted, continued=since is not None)
 
     if mode == "review":
+        if since is not None and not since:
+            raise PeerError(f"No {host_name} reply since {peer_name}'s last answer to review.")
         if not turns:
             raise PeerError("No earlier reply to review.")
         last = turns[-1]
@@ -223,15 +296,21 @@ def build_request(session: Session, peer: str, mode: str, text: str, drop_curren
             f"Then say what is correct, what is wrong or missing, the risks, and what you would do "
             f"differently. Check its claims against the files where you can.{focus}"
         )
-        return Request("review", prompt, last[0].text, last[0].heading, len(turns), omitted)
+        return Request(
+            "review", prompt, last[0].text, last[0].heading, len(turns), omitted, continued=since is not None
+        )
 
     # A direct question, with whatever history exists as context.
     if not text:
         raise PeerError("Nothing to ask.")
+    if not turns and since is not None:
+        prompt = f"{intro}\n\nThe user now asks you directly:\n\n<question>\n{text}\n</question>"
+        return Request("question", prompt, text, "Question", 0, 0, continued=True)
     if not turns:
+        rule = access_rule(write)
         prompt = (
-            f"{MARKER}\nYou are {peer_name}. Working directory: {cwd}. Read files to check facts, but "
-            f"do not modify anything or ask questions; state assumptions instead.\n\n{text}"
+            f"{MARKER}\nYou are {peer_name}. Working directory: {cwd}. {rule[0].upper()}{rule[1:]}; "
+            f"state assumptions instead.\n\n{text}"
         )
         return Request("question", prompt, text, "Question", 0, 0)
     transcript, omitted = render_transcript(turns, host_name, limits)
@@ -240,4 +319,4 @@ def build_request(session: Session, peer: str, mode: str, text: str, drop_curren
         f"The user now asks you directly, with the session above as context:\n\n"
         f"<question>\n{text}\n</question>"
     )
-    return Request("question", prompt, text, "Question", len(turns), omitted)
+    return Request("question", prompt, text, "Question", len(turns), omitted, continued=since is not None)

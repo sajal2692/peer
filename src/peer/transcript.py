@@ -46,6 +46,9 @@ class Session:
     images: list = field(default_factory=list)
     # Instruction files (CLAUDE.md and the like) the host loaded into its context.
     instruction_files: list = field(default_factory=list)
+    # The host's latest permission setting as its transcript records it: Claude Code's
+    # permission mode (such as "auto" or "plan") or Codex's sandbox (such as "read-only").
+    permissions: str | None = None
 
 
 def read_jsonl(path: Path) -> Iterator[dict]:

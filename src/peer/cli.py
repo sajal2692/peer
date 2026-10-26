@@ -12,10 +12,18 @@ from . import __version__
 from .common import TOOL_NAMES, PeerError
 from .models import list_models
 from .output import header, short_header
-from .request import TRIM_DEFAULTS, build_request
+from .request import TRIM_DEFAULTS, build_request, last_peer_session
 from .runner import Run
 from .sessions import resolve_session
-from .settings import config_command, load_config, resolve_assess, resolve_limits, resolve_setting, resolve_switch
+from .settings import (
+    config_command,
+    load_config,
+    resolve_access,
+    resolve_assess,
+    resolve_limits,
+    resolve_setting,
+    resolve_switch,
+)
 from .transcript import IMAGE_REF_RE, Session, save_images
 
 
@@ -78,6 +86,30 @@ def parse_args(argv: list[str]):
         help='let the peer search and fetch web pages (default: on; --no-web, PEER_WEB=0 or "web" in the config '
         "file turn it off)",
     )
+    parser.add_argument(
+        "--write",
+        dest="access",
+        action="store_const",
+        const="write",
+        help="let the peer change files in the folder and run commands with side effects "
+        "(default: match what this session may do)",
+    )
+    parser.add_argument(
+        "--read-only",
+        dest="access",
+        action="store_const",
+        const="read-only",
+        help="keep the peer read-only, whatever this session may do",
+    )
+    parser.add_argument(
+        "--continue",
+        dest="cont",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="continue the peer session from the last peer answer in this conversation instead of starting a "
+        'new one (default: on; --no-continue, PEER_CONTINUE=0 or "continue" in the config file turn it off)',
+    )
+    parser.add_argument("--resume", metavar="ID", help="continue this peer session id")
     parser.add_argument("--ephemeral", action="store_true", help="do not keep the peer session")
     parser.add_argument("--timeout", type=int, default=1800, help="seconds to wait (default: 1800)")
     parser.add_argument("--dry-run", action="store_true", help="print the header and prompt instead of sending it")
@@ -129,7 +161,20 @@ def main(argv: list[str] | None = None) -> int:
             drop = False
         config = load_config()
         limits = resolve_limits(args, config)
-        request = build_request(session, peer, mode, text, drop, limits)
+        resume = args.resume
+        cont = resolve_switch("continue", args.cont, config)
+        if not resume and cont.value == "on":
+            resume = last_peer_session(session, peer)
+            if not resume and args.cont:
+                print(
+                    f"peer: no earlier {TOOL_NAMES[peer]} answer in this conversation; starting a new session.",
+                    file=sys.stderr,
+                )
+        if resume and args.ephemeral:
+            raise PeerError("--ephemeral starts a session that is not kept, so it cannot continue one.")
+        access = resolve_access(args.access, config, session.tool, session.permissions)
+        write = access.value == "write"
+        request = build_request(session, peer, mode, text, drop, limits, write, resume)
         request.limits = limits
         cwd = session.cwd if session.cwd and os.path.isdir(session.cwd) else os.getcwd()
         assess = resolve_assess(args.assess, config)
@@ -142,6 +187,9 @@ def main(argv: list[str] | None = None) -> int:
             resolve_setting(peer, "effort", args.effort, config),
             args,
             web,
+            write,
+            resume,
+            access,
         )
     except PeerError as exc:
         print(f"peer: {exc}", file=sys.stderr)
