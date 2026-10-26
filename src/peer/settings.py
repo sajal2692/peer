@@ -65,7 +65,36 @@ def resolve_switch(key: str, flag: bool | None, config: dict) -> Setting:
 
 
 # Switches that are on unless turned off. The rest are off unless turned on.
-SWITCH_DEFAULTS = {"web": True}
+SWITCH_DEFAULTS = {"web": True, "continue": True}
+
+# Host permission settings under which the host itself changes files and runs commands without
+# asking first. The peer runs headless and cannot ask, so every other setting maps to read-only:
+# Claude Code's "default" mode asks before each edit, and "plan" and "dontAsk" do not edit.
+WRITE_PERMISSIONS = {
+    "claude": {"acceptEdits", "auto", "bypassPermissions"},
+    "codex": {"workspace-write", "danger-full-access"},
+}
+ACCESS_VALUES = ("match", "read-only", "write")
+
+
+def resolve_access(flag: str | None, config: dict, host: str, permissions: str | None) -> Setting:
+    """Whether the peer may write: --write or --read-only, then PEER_ACCESS, then the config
+    file, then whatever the host session itself is allowed to do."""
+    if flag:
+        return Setting(flag, f"--{flag}")
+    choice, source = "match", ""
+    env = os.environ.get("PEER_ACCESS", "").strip().lower()
+    if env in ACCESS_VALUES:
+        choice, source = env, "PEER_ACCESS"
+    elif config.get("access") in ACCESS_VALUES:
+        choice, source = config["access"], "peer config"
+    if choice != "match":
+        return Setting(choice, source)
+    if not permissions:
+        return Setting("read-only", f"no {TOOL_NAMES[host]} permissions to match")
+    what = f"{permissions} mode" if host == "claude" else f"{permissions} sandbox"
+    value = "write" if permissions in WRITE_PERMISSIONS[host] else "read-only"
+    return Setting(value, f"matches {TOOL_NAMES[host]}'s {what}")
 
 
 def resolve_assess(flag: bool | None, config: dict) -> Setting:
@@ -99,6 +128,9 @@ CONFIG_USAGE = """Change a setting:
   peer config details on|off          full run header instead of the stats line
   peer config trim on|off             cut long messages and tool output with sensible limits
   peer config web on|off              let the peer search and fetch web pages
+  peer config continue on|off         continue the peer's session from its last answer here
+  peer config access match|read-only|write
+                                      what the peer may do (match: what your session may do)
   peer config budget <chars>          most transcript characters to send ("default" for no limit)"""
 
 
@@ -118,10 +150,17 @@ def show_config() -> str:
                     f"{key} {own} ({TOOL_NAMES[tool]}'s own config)" if own else f"{key}: {TOOL_NAMES[tool]}'s default"
                 )
         lines.append(f"When {TOOL_NAMES[tool]} answers: " + ", ".join(parts))
-    for key, label in (("assess", "Assessment"), ("details", "Full header"), ("web", "Web access")):
+    for key, label in (
+        ("assess", "Assessment"),
+        ("details", "Full header"),
+        ("web", "Web access"),
+        ("continue", "Continue the peer's session"),
+    ):
         setting = resolve_switch(key, None, config)
         source = "default" if setting.source == "default" else f"from {setting.source}"
         lines.append(f"{label}: {setting.value} ({source})")
+    access = config.get("access") if config.get("access") in ACCESS_VALUES else "match"
+    lines.append(f"Access: {access} ({'from peer config' if 'access' in config else 'default'})")
     trim = resolve_switch("trim", None, config)
     lines.append(f"Trim: {trim.value} ({'default' if trim.source == 'default' else 'from ' + trim.source})")
     budget = config_budget(config)
@@ -148,8 +187,17 @@ def config_command(words: list[str]) -> int:
                 config[tool] = section
             else:
                 config.pop(tool, None)
-        elif len(words) == 2 and words[0] in ("assess", "details", "trim", "web") and words[1].lower() in ("on", "off"):
+        elif (
+            len(words) == 2
+            and words[0] in ("assess", "details", "trim", "web", "continue")
+            and words[1].lower() in ("on", "off")
+        ):
             config[words[0]] = words[1].lower() == "on"
+        elif len(words) == 2 and words[0] == "access" and words[1].lower() in ACCESS_VALUES:
+            if words[1].lower() == "match":
+                config.pop("access", None)
+            else:
+                config["access"] = words[1].lower()
         elif len(words) == 2 and words[0] == "budget" and (words[1].isdigit() or words[1] == "default"):
             if words[1] == "default":
                 config.pop("budget", None)

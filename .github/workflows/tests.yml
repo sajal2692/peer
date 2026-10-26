@@ -34,8 +34,11 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python: ["3.9", "3.12", "3.13", "3.14", "3.15"]
+        python: ["3.12", "3.13", "3.14", "3.15"]
         include:
+          # ubuntu-latest is 26.04, which has no Python 3.9 build; 24.04 still does.
+          - os: ubuntu-24.04
+            python: "3.9"
           # One macOS job with the system Python version: macOS runners are scarce and
           # queue for a long time, and the code paths do not differ by Python version.
           - os: macos-latest

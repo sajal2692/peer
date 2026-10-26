@@ -142,9 +142,12 @@ def parse_claude(path: Path) -> Session:
     local_command_next = False
     ask_ids: set = set()
     peer_call_ids: set = set()  # Bash calls that ran peer
+    mode = None
     rows = [r for r in read_jsonl(path) if not r.get("isSidechain")]  # sidechains are subagent traffic
     for index, row in enumerate(rows):
         cwd = row.get("cwd") or cwd
+        if isinstance(row.get("permissionMode"), str):
+            mode = row["permissionMode"]
         content = (row.get("message") or {}).get("content")
         kind = row.get("type")
         if kind == "attachment" and isinstance(row.get("attachment"), dict):
@@ -224,4 +227,4 @@ def parse_claude(path: Path) -> Session:
         match = TOOL_USE_ID_RE.search(item.text) if item.role == "input" else None
         if match and match.group(1) in peer_call_ids:
             item.peer_run = True
-    return Session("claude", path, cwd, merge_assistant(items), images, instruction_files)
+    return Session("claude", path, cwd, merge_assistant(items), images, instruction_files, mode)

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+**Changes**
+- The other tool now gets the same kind of access as the session you ask from. When your session may change files and run commands on its own (Claude Code in auto, accept-edits or bypass-permissions mode, or Codex in a workspace-write or full-access sandbox), so may the other tool: Codex runs in its workspace-write sandbox with network access, and Claude Code gets `Edit`, `Write` and `Bash`. Otherwise it stays read-only. `--read-only`, `--write` and `peer config access` override this. Connected apps, plugins and MCP servers stay off either way.
+- A later `/peer` in the same conversation continues the other tool's session from its last answer, sending only the turns since then. `--no-continue` or `peer config continue off` starts a new session, and `--resume <id>` picks one by id.
+
 ## 0.1.1
 
 **Install**

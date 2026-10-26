@@ -18,7 +18,7 @@ peer uses only the Python standard library and runs on Python 3.9 or newer. `pee
 | `claude_transcript.py` | Reads a Claude Code transcript |
 | `codex_transcript.py` | Reads a Codex rollout |
 | `request.py` | Turns a session into the prompt: turns, rendering, trimming, the three modes |
-| `runner.py` | Runs the other tool headless and read-only, and parses its answer |
+| `runner.py` | Runs the other tool headless, read-only or with write access, and parses its answer |
 | `settings.py` | Flags, `PEER_*` variables and the config file, and `peer config` |
 | `models.py` | `peer models` |
 | `output.py` | The header printed above the answer |
@@ -36,6 +36,8 @@ CI runs on every push and pull request: lint, the tests on Ubuntu with Python 3.
 4. It runs the other tool headless in the same folder:
    - Codex: `codex exec --sandbox read-only`, with connected apps, plugins, MCP servers, and browser and computer control switched off.
    - Claude Code: `claude -p --tools Read,Grep,Glob,WebSearch,WebFetch`, with MCP servers, hooks and skills off.
+   - With write access (the host's own permissions allow it, or `--write`), Codex gets `--sandbox workspace-write` with network access, and Claude Code gets `Edit,Write,Bash` with `--permission-mode acceptEdits`. The rest of the lockdown stays. The host's permissions come from its transcript: `permissionMode` on Claude Code's rows, `sandbox_policy` in Codex's `turn_context`.
+   - Continuing (the default) finds the other tool's session id in the last `Continue with` line of the transcript and runs `codex exec ... resume <id> -` or `claude -p --resume <id>`, sending only the turns after the one that showed that line.
 5. It prints a header and the answer. The skill shows that output in the asking tool.
 
 Plain text, rather than each tool's own session import, works the same in both directions and never changes the user's existing sessions.

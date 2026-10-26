@@ -1,4 +1,4 @@
-"""Runs the other tool headless and read-only, and reads its answer."""
+"""Runs the other tool headless, read-only unless --write, and reads its answer."""
 
 from __future__ import annotations
 
@@ -30,6 +30,8 @@ CLAUDE_READ_ONLY_TOOLS = ["Read", "Grep", "Glob"]
 # On by default; --no-web removes them. With web access, a prompt injection in the transcript
 # or a file could have the peer put what it read into a URL, so --no-web is there for that.
 CLAUDE_WEB_TOOLS = ["WebSearch", "WebFetch"]
+# Added by --write: editing files and running commands, approved without asking.
+CLAUDE_WRITE_TOOLS = ["Edit", "Write", "Bash"]
 
 # Session-specific variables that must not leak into the peer process.
 SCRUB_EXACT = {
@@ -170,12 +172,17 @@ def codex_command(
     effort: str | None,
     ephemeral: bool,
     lockdown: list[str] | None = None,
+    write: bool = False,
+    resume: str | None = None,
 ) -> list[str]:
+    """codex exec, read-only by default. --write lets it change files in the folder and reach
+    the network. With resume, the run continues that earlier Codex session."""
     cmd = [
         binary,
         "exec",
         "--sandbox",
-        "read-only",
+        "workspace-write" if write else "read-only",
+        *(["-c", "sandbox_workspace_write.network_access=true"] if write else []),
         "--skip-git-repo-check",
         "--color",
         "never",
@@ -191,17 +198,27 @@ def codex_command(
         cmd += ["-c", f"model_reasoning_effort={effort}"]
     if ephemeral:
         cmd.append("--ephemeral")
+    if resume:
+        cmd += ["resume", resume]
     cmd.append("-")
     return cmd
 
 
-def claude_command(binary: str, model: str | None, effort: str | None, ephemeral: bool, web: bool = False) -> list[str]:
-    """Claude Code in print mode with only reading tools available.
+def claude_command(
+    binary: str,
+    model: str | None,
+    effort: str | None,
+    ephemeral: bool,
+    web: bool = False,
+    write: bool = False,
+    resume: str | None = None,
+) -> list[str]:
+    """Claude Code in print mode with only reading tools available, unless --write.
 
     --tools limits which tools exist at all, so permission rules in the user's settings cannot
     re-enable Bash or editing. MCP servers, hooks and skills are switched off for the same reason.
     """
-    tools = ",".join(CLAUDE_READ_ONLY_TOOLS + (CLAUDE_WEB_TOOLS if web else []))
+    tools = ",".join(CLAUDE_READ_ONLY_TOOLS + (CLAUDE_WRITE_TOOLS if write else []) + (CLAUDE_WEB_TOOLS if web else []))
     cmd = [
         binary,
         "-p",
@@ -216,7 +233,7 @@ def claude_command(binary: str, model: str | None, effort: str | None, ephemeral
         "--settings",
         json.dumps({"disableAllHooks": True}),
         "--permission-mode",
-        "default",
+        "acceptEdits" if write else "default",
     ]
     if model:
         cmd += ["--model", model]
@@ -224,6 +241,8 @@ def claude_command(binary: str, model: str | None, effort: str | None, ephemeral
         cmd += ["--effort", effort]
     if ephemeral:
         cmd.append("--no-session-persistence")
+    if resume:
+        cmd += ["--resume", resume]
     return cmd
 
 
@@ -311,18 +330,33 @@ def run_process(cmd: list[str], prompt: str, timeout: int, cwd: str | None, name
 class Run:
     """One peer call: the command it will run, and running it."""
 
-    def __init__(self, peer: str, cwd: str, model: Setting, effort: Setting, args, web: bool = False):
+    def __init__(
+        self,
+        peer: str,
+        cwd: str,
+        model: Setting,
+        effort: Setting,
+        args,
+        web: bool = False,
+        write: bool = False,
+        resume: str | None = None,
+        access: Setting | None = None,
+    ):
         self.peer, self.cwd, self.model, self.effort, self.args, self.web = peer, cwd, model, effort, args, web
+        self.write, self.resume = write, resume
+        self.access = access or Setting("write" if write else "read-only", "--write" if write else "default")
         binary = find_binary(peer)
         if peer == "codex":
             # A dry run only shows the command, so it skips probing Codex's features.
             lockdown = ["<lockdown flags>"] if args.dry_run else codex_lockdown(binary, web)
             self.tmp = tempfile.TemporaryDirectory(prefix="peer-")
             self.out_file = Path(self.tmp.name) / "answer.md"
-            self.cmd = codex_command(binary, cwd, self.out_file, model.value, effort.value, args.ephemeral, lockdown)
+            self.cmd = codex_command(
+                binary, cwd, self.out_file, model.value, effort.value, args.ephemeral, lockdown, write, resume
+            )
         else:
             self.tmp, self.out_file = None, None
-            self.cmd = claude_command(binary, model.value, effort.value, args.ephemeral, web)
+            self.cmd = claude_command(binary, model.value, effort.value, args.ephemeral, web, write, resume)
 
     def close(self) -> None:
         if self.tmp:
