@@ -37,8 +37,12 @@ def claude_efforts(binary: str) -> list[str]:
         out = subprocess.run([binary, "--help"], capture_output=True, text=True, timeout=30).stdout
     except (OSError, subprocess.SubprocessError):
         out = ""
-    match = re.search(r"--effort.*?\(([a-z, ]+)\)", out, re.S)
-    return [e.strip() for e in match.group(1).split(",")] if match else ["low", "medium", "high", "xhigh", "max"]
+    return claude_efforts_from_help(out) or ["low", "medium", "high", "xhigh", "max"]
+
+
+def claude_efforts_from_help(help_text: str) -> list[str]:
+    match = re.search(r"--effort.*?\(([a-z, ]+)\)", help_text, re.S)
+    return [e.strip() for e in match.group(1).split(",")] if match else []
 
 
 def claude_extra_models() -> list[tuple[str, str]]:

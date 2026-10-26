@@ -26,7 +26,16 @@ peer uses only the Python standard library and runs on Python 3.9 or newer. `pee
 
 The skills live in `skills/claude/peer` and `skills/codex/peer`. `tests/test_cli.py` runs peer end to end against fake `codex` and `claude` binaries, so the tests need neither tool installed.
 
-CI runs on every push and pull request: lint, the tests on Ubuntu with Python 3.9, 3.12, 3.13, 3.14 and 3.15 and on macOS with Python 3.9, a non-blocking run on the newest Python build including pre-releases, a coverage floor of 80 percent, and a test install into an empty home folder.
+CI runs on every push and pull request: lint, the tests on Ubuntu with Python 3.9, 3.12, 3.13, 3.14 and 3.15 and on macOS with Python 3.9, a non-blocking run on the newest Python build including pre-releases, a coverage floor of 80 percent, and a test install into an empty home folder. The `upstream` workflow also runs daily; see below.
+
+## When Codex or Claude Code update
+
+peer depends on details of both CLIs that a release can change: the flags it passes, the columns of `codex features list` and the names of the features it switches off, the JSON from `codex debug models` and `claude -p --output-format json`, the lines Codex prints on stderr, and both transcript formats. Two checks watch for this.
+
+- `scripts/check_upstream.py` needs no account. It checks every flag peer builds against `--help`, that the feature list still parses, and that no new feature is on by default unless it is in `CODEX_RISKY_FEATURES` or `scripts/codex_features_reviewed.txt`. The `upstream` workflow runs it daily against the newest Codex release, the newest Codex alpha and the newest Claude Code, and opens an issue when it fails.
+- `scripts/upstream_smoke.py` uses your signed-in tools. In each direction it starts a short session holding a random code word, checks that peer parses the transcript, and asks the other tool through peer to recall the word. It deletes those sessions afterwards. `scripts/install_upstream_watch.sh` runs it from launchd every six hours and at login, but it only makes model calls when the upstream workflow has an issue open: then it runs once per issue and set of installed versions and reports by macOS notification. It needs `gh` signed in. Remove it with `scripts/install_upstream_watch.sh --uninstall`.
+
+When the feature check fails for a new feature, decide whether it can act outside the read-only sandbox. If it can, add it to `CODEX_RISKY_FEATURES` in `src/peer/runner.py`; if not, add it to `scripts/codex_features_reviewed.txt`.
 
 ## How it works
 

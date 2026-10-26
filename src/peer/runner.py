@@ -113,6 +113,12 @@ CODEX_RISKY_FEATURES = (
 MCP_SERVER_RE = re.compile(r'^\s*\[?\s*mcp_servers\.(?:"([^"]+)"|([A-Za-z0-9_-]+))[.\]\s=]', re.M)
 
 
+def parse_feature_rows(out: str) -> list[list[str]]:
+    """The rows of `codex features list`: a name first, whether it is on last."""
+    rows = [line.split() for line in out.splitlines() if len(line.split()) >= 2]
+    return [row for row in rows if row[-1] in ("true", "false")]
+
+
 def codex_lockdown(binary: str, web: bool = False) -> list[str]:
     """Flags that switch off every Codex tool able to act outside the read-only sandbox.
 
@@ -137,8 +143,8 @@ def codex_lockdown(binary: str, web: bool = False) -> list[str]:
         raise PeerError(f"Could not start Codex: {exc}") from None
     except (OSError, subprocess.SubprocessError):
         out = ""
-    rows = [line.split() for line in out.splitlines() if len(line.split()) >= 2]
-    if not any(row[-1] in ("true", "false") for row in rows):
+    rows = parse_feature_rows(out)
+    if not rows:
         raise PeerError(
             "Could not read Codex's feature list (codex features list), so peer cannot switch off the Codex "
             "tools that act outside its read-only sandbox. Update Codex, or set PEER_CODEX_BIN to a newer one."
